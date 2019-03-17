@@ -10,15 +10,33 @@ Python 3.6+ is required. Working in a virtualenv is assumed below::
     python setup.py develop
 
 
-Usage
------
+Prepare data for training
+-------------------------
 
 Corpus format: a directory with top-level ``train``, ``valid`` and ``test``
 folders. Each top-level folder may contain sub-folders. Inside them,
 there must be utf-8 encoded text files with ``.txt`` extension.
 
-In all commands, multiple corpora are supported (the model will be trained
-and validated on all corpora).
+The commands to train sentencepiece model and encode the corpus support
+multiple corpora,
+in below examples we assume they can be listed as ``data/corpora-*``.
+
+1. Train sentencepiece model (``sp-text.txt`` can be removed after running).
+   This can consume a large amount of memory, adjust sentencepiece arguments
+   as advised if needed
+   (this is not supported in the ``sp-train`` command directly)::
+
+    sp-train data/corpora-* sp-text.txt sp-model
+
+2. Encode corpora, producing numpy files::
+
+    sp-encode /data/corpora-* sp-model.model data/encoded
+
+
+Training
+--------
+
+TODO
 
 License
 -------
