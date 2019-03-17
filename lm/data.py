@@ -1,6 +1,8 @@
 import argparse
+from collections import defaultdict
 from pathlib import Path
 
+import numpy as np
 import sentencepiece as spm
 import tqdm
 
@@ -33,8 +35,8 @@ def sp_train():
             train_root = corpus_root / 'train'
             corpus_paths = list(train_root.glob('**/*.txt'))
             if not corpus_paths:
-                parser.error('Corpus train split {train_root} looks empty, '
-                             'no text files found')
+                parser.error(f'Corpus train split {train_root} looks empty, '
+                             f'no text files found')
             paths.extend(corpus_paths)
         try:
             with sp_text.open('wt', encoding='utf8') as sp_text_file:
@@ -63,7 +65,47 @@ def sp_train():
     ]))
 
 
-def encode_corpus():
-    pass  # TODO
+def sp_encode():
+    parser = argparse.ArgumentParser(
+        description='encode corpus with a sentencepiece model')
+    arg = parser.add_argument
+    arg('corpora', nargs='+',
+        help='corpus roots, containing train/valid/test splits')
+    arg('sp_model', help='path to output model')
+    arg('output', help='path to the output directory, '
+                       'which will contain train.npy, valid.npy and test.npy')
+    args = parser.parse_args()
 
+    sp_model = spm.SentencePieceProcessor()
+    assert sp_model.load(args.sp_model)
+    eot = sp_model.PieceToId(END_OF_TEXT)
+    eol = sp_model.PieceToId(END_OF_LINE)
+    dtype = np.uint16 if len(sp_model) < 2**16 - 1 else np.uint32
+
+    print(f'Reading corpora: {args.corpora}')
+    encoded_splits = defaultdict(list)
+    for corpus_root in map(Path, args.corpora):
+        for split in ['train', 'valid', 'test']:
+            split_root = corpus_root / split
+            split_paths = list(split_root.glob('**/*.txt'))
+            if not split_paths:
+                parser.error(f'Corpus {split} split {split_root} looks empty, '
+                             f'no text files found')
+            for path in tqdm.tqdm(split_paths, desc=str(split_root)):
+                encoded = []
+                with path.open('rt', encoding='utf8') as f:
+                    for line in f.readlines():
+                        encoded.extend(sp_model.EncodeAsIds(line))
+                        encoded.append(eol)
+                    encoded.append(eot)
+                encoded_splits[split].append(np.array(encoded, dtype=dtype))
+
+    output_root = Path(args.output)
+    output_root.mkdir(exist_ok=True, parents=True)
+    for split in ['train', 'valid', 'test']:
+        split_path = output_root / f'{split}.npy'
+        print(f'Saving encoded split {split} to {split_path}')
+        encoded = np.concatenate(encoded_splits[split])
+        assert encoded.dtype == dtype
+        np.save(split_path, encoded)
 
