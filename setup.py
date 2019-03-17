@@ -7,5 +7,12 @@ setup(
         'numpy',
         'sentencepiece',
         'torch',
+        'tqdm',
     ],
+    entry_points={
+        'console_scripts': [
+            'lm-train = lm.train:main',
+            'sp-train = lm.data:sp_train',
+        ],
+    }
 )
