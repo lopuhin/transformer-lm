@@ -2,7 +2,6 @@
 Based on https://github.com/nshepperd/gpt-2/blob/finetuning/train.py
 """
 from pathlib import Path
-import time
 
 import fire
 import numpy as np
@@ -39,12 +38,13 @@ def train(
 
     run_path = Path(run_path)
     run_path.mkdir(exist_ok=True, parents=True)
-    checkpoint_path = run_path / 'checkpoint'
+    checkpoints_path = run_path / 'checkpoints'
     samples_path = run_path / 'samples'
+    summaries_path = run_path / 'summaries'
     dataset_path = Path(dataset_path)
     train_path = dataset_path / 'train.npy'
-    if run_path.exists() and restore_from is None:
-        restore_from = checkpoint_path
+    if checkpoints_path.exists() and restore_from is None:
+        restore_from = checkpoints_path
 
     hparams = model.HPARAMS[config]
     hparams.n_vocab = len(sp_model)
@@ -65,6 +65,12 @@ def train(
         loss = tf.reduce_mean(
             tf.nn.sparse_softmax_cross_entropy_with_logits(
                 labels=context[:, 1:], logits=output['logits'][:, :-1]))
+        tf.summary.scalar('loss', loss)
+
+        summaries = tf.summary.merge_all()
+        summaries_path.mkdir(exist_ok=True, parents=True)
+        train_writer = tf.summary.FileWriter(
+            summaries_path / 'train', sess.graph)
 
         tf_sample = sample.sample_sequence(
             hparams=hparams,
@@ -94,17 +100,17 @@ def train(
         print(f'Dataset has {len(dataset):,} tokens')
         print('Training...')
 
-        counter = 1
-        counter_path = checkpoint_path / 'counter'
-        if counter_path.exists():
+        step = 1
+        step_path = checkpoints_path / 'step'
+        if step_path.exists():
             # Load the step number if we're resuming a run
             # Add 1 so we don't immediately try to save again
-            counter = int(counter_path.read_text()) + 1
+            step = int(step_path.read_text()) + 1
 
         def save():
-            checkpoint_path.mkdir(exist_ok=True, parents=True)
-            saver.save(sess, checkpoint_path / 'model', global_step=counter)
-            counter_path.write_text(str(counter) + '\n')
+            checkpoints_path.mkdir(exist_ok=True, parents=True)
+            saver.save(sess, checkpoints_path / 'model', global_step=step)
+            step_path.write_text(str(step) + '\n')
 
         def generate_samples():
             context_tokens = [sp_model.PieceToId(END_OF_TEXT)]
@@ -120,7 +126,7 @@ def train(
                     all_text.append(text)
                     index += 1
             samples_path.mkdir(exist_ok=True, parents=True)
-            (samples_path / f'samples-{counter}.txt').write_text(
+            (samples_path / f'samples-{step}.txt').write_text(
                 '\n'.join(all_text))
 
         avg_loss = (0.0, 0.0)
@@ -130,21 +136,23 @@ def train(
                 epoch_pbar = tqdm.trange(epoch_size, desc=f'epoch {epoch}')
                 for _ in epoch_pbar:
 
-                    if counter % save_every == 0:
+                    if step % save_every == 0:
                         save()
-                    if counter % sample_every == 0:
+                    if step % sample_every == 0:
                         generate_samples()
 
                     batch = _gen_batch(
                         dataset, n_ctx=hparams.n_ctx, batch_size=batch_size)
-                    _, lv = sess.run((opt, loss), feed_dict={context: batch})
-                    counter += 1
+                    _, lv, summary = sess.run(
+                        [opt, loss, summaries], feed_dict={context: batch})
+                    train_writer.add_summary(summary, step)
+                    step += 1
 
                     avg_loss = (avg_loss[0] * 0.99 + lv,
                                 avg_loss[1] * 0.99 + 1.0)
                     avg = avg_loss[0] / avg_loss[1]
                     epoch_pbar.set_postfix({
-                        'step': counter,
+                        'step': step,
                         'loss': f'{lv:.2f}',
                         'avg': f'{avg:.2f}',
                     })
