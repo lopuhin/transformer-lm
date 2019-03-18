@@ -6,9 +6,11 @@ import time
 
 import fire
 import numpy as np
+import sentencepiece as spm
 import tensorflow as tf
 
 from . import model, sample
+from lm.data import END_OF_TEXT
 
 
 @fire.Fire
@@ -19,25 +21,31 @@ def main(
         *,
         seed=None,
         batch_size=1,
-        sample_length=1023,
+        sample_length=None,
         sample_num=1,
         sample_every=100,
         restore_from=None,  # 'latest' or checkpoint path
         save_every=1000,
         config='default',
         ):
+    sp_model = spm.SentencePieceProcessor()
+    sp_model.load(sp_model_path)
 
     run_path = Path(run_path)
     run_path.mkdir(exist_ok=True, parents=True)
     checkpoint_path = run_path / 'checkpoint'
     samples_path = run_path / 'samples'
+    dataset_path = Path(dataset_path)
+    train_path = dataset_path / 'train.npy'
+
     hparams = model.HPARAMS[config]
+    hparams.n_vocab = len(sp_model)
 
     if sample_length is None:
-        sample_length = hparams.n_ctx // 2
+        sample_length = hparams.n_ctx - 1
     elif sample_length > hparams.n_ctx:
         raise ValueError(
-            'Can\'t get samples longer than window size: {hparams.n_ctx}')
+            f'Can\'t get samples longer than window size: {hparams.n_ctx}')
 
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
@@ -54,7 +62,7 @@ def main(
             hparams=hparams,
             length=sample_length,
             context=context,
-            batch_size=batch_size,
+            batch_size=batch_size,  # TODO try min(sample_num, batch_size)
             temperature=1.0,
             top_k=40)
 
@@ -74,8 +82,8 @@ def main(
             saver.restore(sess, ckpt)
 
         print('Loading dataset...')
-        dataset = np.load(dataset_path)
-        print('Dataset has {len(dataset)} tokens')
+        dataset = np.load(train_path)
+        print(f'Dataset has {len(dataset):,} tokens')
         print('Training...')
 
         counter = 1
@@ -92,22 +100,19 @@ def main(
             counter_path.write_text(str(counter) + '\n')
 
         def generate_samples():
-            # TODO use endoftext
-            context_tokens = data_sampler.sample(1)
+            context_tokens = [sp_model.PieceToId(END_OF_TEXT)]
             all_text = []
             index = 0
-            text = None
             while index < sample_num:
                 out = sess.run(
-                    tf_sample, feed_dict={context: batch_size*[context_tokens]})
+                    tf_sample,
+                    feed_dict={context: batch_size * [context_tokens]})
                 for i in range(min(sample_num - index, batch_size)):
-                    # TODO
-                    import IPython; IPython.embed()
-                    text = enc.decode(out[i])
+                    text = sp_model.DecodeIds(list(map(int, out[i])))
                     text = f'======== SAMPLE {index + 1} ========\n{text}\n'
                     all_text.append(text)
                     index += 1
-            print(text)
+                    print(text)
 
             samples_path.mkdir(exist_ok=True, parents=True)
             (samples_path / f'samples-{counter}.txt').write_text(
@@ -132,7 +137,7 @@ def main(
 
                 avg_loss = (avg_loss[0] * 0.99 + lv, avg_loss[1] * 0.99 + 1.0)
                 elapsed = time.time() - start_time
-                avg = avg_loss[0] / avg_loss[1]  # FIXME what is this?
+                avg = avg_loss[0] / avg_loss[1]
                 print(f'[{counter} | {elapsed:0f}] '
                       f'loss={lv:.2f} avg={avg:.2f}')
 
