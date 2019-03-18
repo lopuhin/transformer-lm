@@ -36,7 +36,11 @@ in below examples we assume they can be listed as ``data/corpora-*``.
 Training
 --------
 
-TODO
+Currently training of OpenAI GPT-2 model is supported, example command::
+
+    gpt-2-tf-train \
+        run-root data/encoded sp-model.model \
+        --batch-size 32 --sample-num 4 --config small
 
 License
 -------

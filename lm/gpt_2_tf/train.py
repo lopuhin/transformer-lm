@@ -8,26 +8,32 @@ import fire
 import numpy as np
 import sentencepiece as spm
 import tensorflow as tf
+import tqdm
 
 from . import model, sample
 from lm.data import END_OF_TEXT
 
 
-@fire.Fire
-def main(
+def main():
+    return fire.Fire(train)
+
+
+def train(
         run_path,
         dataset_path,
         sp_model_path,
         *,
+        batch_size,
+        epochs=10,
         seed=None,
-        batch_size=1,
         sample_length=None,
         sample_num=1,
-        sample_every=100,
-        restore_from=None,  # 'latest' or checkpoint path
+        sample_every=1000,
+        restore_from=None,  # checkpoint path, or from latest by default
         save_every=1000,
         config='default',
         ):
+
     sp_model = spm.SentencePieceProcessor()
     sp_model.load(sp_model_path)
 
@@ -37,6 +43,8 @@ def main(
     samples_path = run_path / 'samples'
     dataset_path = Path(dataset_path)
     train_path = dataset_path / 'train.npy'
+    if run_path.exists() and restore_from is None:
+        restore_from = checkpoint_path
 
     hparams = model.HPARAMS[config]
     hparams.n_vocab = len(sp_model)
@@ -62,7 +70,7 @@ def main(
             hparams=hparams,
             length=sample_length,
             context=context,
-            batch_size=batch_size,  # TODO try min(sample_num, batch_size)
+            batch_size=batch_size,
             temperature=1.0,
             top_k=40)
 
@@ -71,17 +79,17 @@ def main(
 
         saver = tf.train.Saver(
             var_list=train_vars,
-            max_to_keep=4,
-            keep_checkpoint_every_n_hours=1)
+            max_to_keep=2,
+            keep_checkpoint_every_n_hours=4)
         sess.run(tf.global_variables_initializer())
 
-        if restore_from is not None:
-            ckpt = tf.train.latest_checkpoint(
-                checkpoint_path if restore_from == 'latest' else restore_from)
-            print('Loading checkpoint', ckpt)
+        if restore_from:
+            print(f'Restoring from {restore_from}')
+            ckpt = tf.train.latest_checkpoint(restore_from)
+            print(f'Loading checkpoint {ckpt}')
             saver.restore(sess, ckpt)
 
-        print('Loading dataset...')
+        print(f'Loading dataset {train_path}')
         dataset = np.load(train_path)
         print(f'Dataset has {len(dataset):,} tokens')
         print('Training...')
@@ -95,7 +103,6 @@ def main(
 
         def save():
             checkpoint_path.mkdir(exist_ok=True, parents=True)
-            print(f'Saving at {counter:,}')
             saver.save(sess, checkpoint_path / 'model', global_step=counter)
             counter_path.write_text(str(counter) + '\n')
 
@@ -112,36 +119,42 @@ def main(
                     text = f'======== SAMPLE {index + 1} ========\n{text}\n'
                     all_text.append(text)
                     index += 1
-                    print(text)
-
             samples_path.mkdir(exist_ok=True, parents=True)
             (samples_path / f'samples-{counter}.txt').write_text(
                 '\n'.join(all_text))
 
         avg_loss = (0.0, 0.0)
-        start_time = time.time()
-
         try:
-            while True:
-                if counter % save_every == 0:
-                    save()
-                if counter % sample_every == 0:
-                    generate_samples()
+            for epoch in tqdm.trange(1, epochs + 1, desc='epoch'):
+                epoch_size = len(dataset) // hparams.n_ctx
+                epoch_pbar = tqdm.trange(epoch_size, desc=f'epoch {epoch}')
+                for _ in epoch_pbar:
 
-                indices = [np.random.randint(0, len(dataset) - hparams.n_ctx)
-                           for _ in range(batch_size)]
-                batch = [dataset[idx : idx + hparams.n_ctx]
-                         for idx in indices]
+                    if counter % save_every == 0:
+                        save()
+                    if counter % sample_every == 0:
+                        generate_samples()
 
-                _, lv = sess.run((opt, loss), feed_dict={context: batch})
+                    batch = _gen_batch(
+                        dataset, n_ctx=hparams.n_ctx, batch_size=batch_size)
+                    _, lv = sess.run((opt, loss), feed_dict={context: batch})
+                    counter += 1
 
-                avg_loss = (avg_loss[0] * 0.99 + lv, avg_loss[1] * 0.99 + 1.0)
-                elapsed = time.time() - start_time
-                avg = avg_loss[0] / avg_loss[1]
-                print(f'[{counter} | {elapsed:0f}] '
-                      f'loss={lv:.2f} avg={avg:.2f}')
+                    avg_loss = (avg_loss[0] * 0.99 + lv,
+                                avg_loss[1] * 0.99 + 1.0)
+                    avg = avg_loss[0] / avg_loss[1]
+                    epoch_pbar.set_postfix({
+                        'step': counter,
+                        'loss': f'{lv:.2f}',
+                        'avg': f'{avg:.2f}',
+                    })
 
-                counter += 1
         except KeyboardInterrupt:
             print('Interrupted, saving')
             save()
+
+
+def _gen_batch(dataset: np.ndarray, n_ctx: int, batch_size: int):
+    indices = [np.random.randint(0, len(dataset) - n_ctx)
+               for _ in range(batch_size)]
+    return [dataset[idx : idx + n_ctx] for idx in indices]
