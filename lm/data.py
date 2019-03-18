@@ -13,6 +13,7 @@ END_OF_TEXT = '<endoftext>'
 
 
 def sp_train():
+    # TODO consider moving to fire
     parser = argparse.ArgumentParser(
         description='build sentencepiece model on train subset of the corpora')
     arg = parser.add_argument

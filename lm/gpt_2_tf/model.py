@@ -7,14 +7,22 @@ import tensorflow as tf
 from tensorflow.contrib.training import HParams
 
 
-def default_hparams():
-    return HParams(
+HPARAMS = {
+    'default': HParams(
         n_vocab=0,
         n_ctx=1024,
         n_embd=768,
         n_head=12,
         n_layer=12,
-    )
+    ),
+    'small': HParams(
+        n_vocab=0,
+        n_ctx=256,
+        n_embd=256,
+        n_head=8,
+        n_layer=8,
+    ),
+}
 
 
 def shape_list(x):

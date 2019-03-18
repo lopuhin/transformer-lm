@@ -1,8 +1,8 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(
     name='lm',
-    packages=['lm'],
+    packages=find_packages(),
     install_requires=[
         'fire',
         'numpy',
@@ -14,6 +14,7 @@ setup(
         'console_scripts': [
             'sp-train = lm.data:sp_train',
             'sp-encode = lm.data:sp_encode',
+            'gpt-2-tf-train = lm.gpt_2_tf.train:main',
         ],
     }
 )
