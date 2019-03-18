@@ -1,7 +1,9 @@
 """
 Based on https://github.com/nshepperd/gpt-2/blob/finetuning/train.py
 """
+import json
 from pathlib import Path
+import sys
 
 import fire
 import numpy as np
@@ -23,13 +25,14 @@ def train(
         sp_model_path,
         *,
         batch_size,
+        lr=1e-3,
         epochs=10,
-        seed=None,
         sample_length=None,
         sample_num=1,
         sample_every=1000,
         restore_from=None,  # checkpoint path, or from latest by default
         save_every=1000,
+        log_every=20,
         config='default',
         ):
 
@@ -48,6 +51,16 @@ def train(
 
     hparams = model.HPARAMS[config]
     hparams.n_vocab = len(sp_model)
+    (run_path / 'params.json').write_text(json.dumps(dict(
+        hparams=hparams.values(),
+        dataset_path=str(dataset_path),
+        sp_model_path=sp_model_path,
+        batch_size=batch_size,
+        lr=lr,
+        epochs=epochs,
+        restore_from=str(restore_from),
+        argv=sys.argv,
+    ), indent=4, sort_keys=True))
 
     if sample_length is None:
         sample_length = hparams.n_ctx - 1
@@ -59,8 +72,6 @@ def train(
     config.gpu_options.allow_growth = True
     with tf.Session(config=config) as sess:
         context = tf.placeholder(tf.int32, [batch_size, None])
-        np.random.seed(seed)
-        tf.set_random_seed(seed)
         output = model.model(hparams=hparams, X=context)
         loss = tf.reduce_mean(
             tf.nn.sparse_softmax_cross_entropy_with_logits(
@@ -81,7 +92,7 @@ def train(
             top_k=40)
 
         train_vars = [v for v in tf.trainable_variables() if 'model' in v.name]
-        opt = tf.train.AdamOptimizer().minimize(loss, var_list=train_vars)
+        opt = tf.train.AdamOptimizer(lr).minimize(loss, var_list=train_vars)
 
         saver = tf.train.Saver(
             var_list=train_vars,
@@ -145,7 +156,8 @@ def train(
                         dataset, n_ctx=hparams.n_ctx, batch_size=batch_size)
                     _, lv, summary = sess.run(
                         [opt, loss, summaries], feed_dict={context: batch})
-                    train_writer.add_summary(summary, step)
+                    if step % log_every == 0:
+                        train_writer.add_summary(summary, step)
                     step += 1
 
                     avg_loss = (avg_loss[0] * 0.99 + lv,
