@@ -4,7 +4,9 @@ Transformer language model with sentencepiece tokenizer
 Installation
 ------------
 
-Python 3.6+ is required. Working in a virtualenv is assumed below::
+Python 3.6+ is required. Working in a virtualenv is assumed below.
+`Install <https://www.tensorflow.org/install/pip>`_
+appropriate version of Tensorflow 1.13 first, and then::
 
     pip install -r requirements.txt
     python setup.py develop
