@@ -1,6 +1,10 @@
 Transformer language model with sentencepiece tokenizer
 =======================================================
 
+.. image:: https://img.shields.io/travis/lopuhin/transformer-lm/master.svg
+   :target: https://travis-ci.org/lopuhin/transformer-lm
+   :alt: Build Status
+
 Training transformer language models (currently only GPT-2) on your own corpora
 with `sentencepiece <https://github.com/google/sentencepiece>`_ tokenization.
 
