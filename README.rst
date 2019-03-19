@@ -10,8 +10,14 @@ Python 3.6+ is required. Working in a virtualenv is assumed below::
     python setup.py develop
 
 
+Usage
+-----
+
+Instructions are below. See also ``test/test_shakespeare.sh``
+for a complete pipeline demo on a small corpus (takes a few minutes on CPU).
+
 Prepare data for training
--------------------------
++++++++++++++++++++++++++
 
 Corpus format: a directory with top-level ``train``, ``valid`` and ``test``
 folders. Each top-level folder may contain sub-folders. Inside them,
@@ -34,7 +40,7 @@ in below examples we assume they can be listed as ``data/corpora-*``.
 
 
 Training
---------
+++++++++
 
 Currently training of OpenAI GPT-2 model is supported, example command::
 

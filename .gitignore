@@ -1,2 +1,9 @@
 *.egg-info
 __pycache__
+
+# produced by tests/test_shakespeare.sh
+/tests/shakespeare-encoded/
+/tests/shakespeare-test-run/
+/tests/shakespeare/sp-model.model
+/tests/shakespeare/sp-model.vocab
+/tests/shakespeare/sp-text.txt
