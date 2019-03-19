@@ -46,3 +46,6 @@ License
 -------
 
 License is MIT.
+
+Test Shakespeare corpus under ``tests/shakespeare``
+is from http://shakespeare.mit.edu under public domain.
