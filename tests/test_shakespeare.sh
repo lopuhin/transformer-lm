@@ -15,14 +15,15 @@ sp-encode \
     tests/shakespeare/sp-model.model \
     tests/shakespeare-encoded
 
-rm -rf tests/shakespeare-test-run/  # to avoid loading the old model
 gpt-2-tf-train \
     tests/shakespeare-test-run/ \
     tests/shakespeare-encoded/ \
     tests/shakespeare/sp-model.model \
     --batch-size 4 \
+    --accum-gradients 2 \
     --config small \
     --epochs 2 \
     --log-every 2 \
     --sample-every 10 \
-    --sample-num 2
+    --sample-num 2 \
+    --clean
