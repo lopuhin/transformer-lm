@@ -1,6 +1,11 @@
 Transformer language model with sentencepiece tokenizer
 =======================================================
 
+Training transformer language models (currently only GPT-2) on your own corpora
+with `sentencepiece <https://github.com/google/sentencepiece>`_ tokenization.
+
+.. contents::
+
 Installation
 ------------
 
@@ -50,10 +55,15 @@ Currently training of OpenAI GPT-2 model is supported, example command::
         run-root data/encoded sp-model.model \
         --batch-size 32 --sample-num 4 --config small
 
-License
--------
+License & credits
+-----------------
 
 License is MIT.
+
+GPT-2 model is taken from
+https://github.com/openai/gpt-2/blob/master/src/model.py
+and GPT-2 training code is based on
+https://github.com/nshepperd/gpt-2/blob/finetuning/train.py
 
 Test Shakespeare corpus under ``tests/shakespeare``
 is from http://shakespeare.mit.edu under public domain.
