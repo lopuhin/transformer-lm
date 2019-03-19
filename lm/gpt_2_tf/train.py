@@ -143,7 +143,7 @@ def train(
         avg_loss = (0.0, 0.0)
         try:
             for epoch in tqdm.trange(1, epochs + 1, desc='epoch'):
-                epoch_size = len(dataset) // hparams.n_ctx
+                epoch_size = len(dataset) // (hparams.n_ctx * batch_size)
                 epoch_pbar = tqdm.trange(epoch_size, desc=f'epoch {epoch}')
                 for _ in epoch_pbar:
 
