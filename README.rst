@@ -70,3 +70,7 @@ https://github.com/nshepperd/gpt-2/blob/finetuning/train.py
 
 Test Shakespeare corpus under ``tests/shakespeare``
 is from http://shakespeare.mit.edu under public domain.
+
+See also OpenAI GPT-2
+`paper <https://d4mucfpksywv.cloudfront.net/better-language-models/language-models.pdf>`_
+and `blog <https://openai.com/blog/better-language-models/>`_.
