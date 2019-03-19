@@ -55,6 +55,9 @@ Currently training of OpenAI GPT-2 model is supported, example command::
         run-root data/encoded sp-model.model \
         --batch-size 32 --sample-num 4 --config small
 
+``run-root`` would contain Tensorboard logs,
+model checkpoints and generated samples.
+
 License & credits
 -----------------
 
