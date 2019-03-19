@@ -30,7 +30,7 @@ in below examples we assume they can be listed as ``data/corpora-*``.
 
 2. Encode corpora, producing numpy files::
 
-    sp-encode /data/corpora-* sp-model.model data/encoded
+    sp-encode data/corpora-* sp-model.model data/encoded
 
 
 Training
