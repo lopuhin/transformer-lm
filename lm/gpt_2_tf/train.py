@@ -43,7 +43,7 @@ def train(
     sp_model.load(sp_model_path)
 
     run_path = Path(run_path)
-    if clean:
+    if clean and run_path.exists():
         extra_names = {p.name for p in run_path.iterdir()} - {
             'checkpoints', 'samples', 'summaries', 'params.json'}
         assert not extra_names, extra_names
