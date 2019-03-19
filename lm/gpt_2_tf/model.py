@@ -22,6 +22,13 @@ HPARAMS = {
         n_head=8,
         n_layer=8,
     ),
+    'tiny': HParams(
+        n_vocab=0,
+        n_ctx=64,
+        n_embd=64,
+        n_head=4,
+        n_layer=4,
+    ),
 }
 
 

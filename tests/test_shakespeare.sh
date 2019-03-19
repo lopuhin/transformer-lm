@@ -21,9 +21,9 @@ gpt-2-tf-train \
     tests/shakespeare/sp-model.model \
     --batch-size 4 \
     --accum-gradients 2 \
-    --config small \
-    --epochs 2 \
+    --config tiny \
+    --epochs 1 \
     --log-every 2 \
-    --sample-every 10 \
-    --sample-num 2 \
+    --sample-every 50 \
+    --sample-num 4 \
     --clean

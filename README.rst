@@ -21,7 +21,7 @@ Usage
 -----
 
 Instructions are below. See also ``test/test_shakespeare.sh``
-for a complete pipeline demo on a small corpus (takes a few minutes on CPU).
+for a complete pipeline demo on a small corpus (takes a minute on a CPU).
 
 Prepare data for training
 +++++++++++++++++++++++++
