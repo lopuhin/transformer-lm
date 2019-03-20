@@ -14,12 +14,14 @@ import tqdm
 
 from . import model, sample
 from lm.data import END_OF_TEXT
+from lm.fire_utils import only_allow_defined_args
 
 
 def main():
     return fire.Fire(train)
 
 
+@only_allow_defined_args
 def train(
         run_path,
         dataset_path,
