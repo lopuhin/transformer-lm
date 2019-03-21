@@ -5,9 +5,11 @@ import json
 from pathlib import Path
 import sys
 import shutil
+from typing import List, Tuple
 
 import fire
 import numpy as np
+import matplotlib.pyplot as plt
 import sentencepiece as spm
 import tensorflow as tf
 import tqdm
@@ -38,6 +40,7 @@ def train(
         log_every=20,
         config='default',
         accum_gradients=1,  # accumulate gradients N times
+        find_lr=False,  # instead of normal training, run lr range finder
         clean=False,
         # override hparams from config
         n_ctx=None,
@@ -51,8 +54,12 @@ def train(
 
     run_path = Path(run_path)
     if clean and run_path.exists():
-        extra_names = {p.name for p in run_path.iterdir()} - {
-            'checkpoints', 'samples', 'summaries', 'params.json'}
+        extra_names = {
+            p.name for p in run_path.iterdir()
+            if not (
+               p.name in {'checkpoints', 'samples', 'summaries', 'params.json'}
+               or p.name.startswith('find-lr')
+        )}
         assert not extra_names, extra_names
         shutil.rmtree(run_path)
     run_path.mkdir(exist_ok=True, parents=True)
@@ -112,7 +119,8 @@ def train(
             top_k=40)
 
         train_vars = tf.trainable_variables()
-        opt = tf.train.AdamOptimizer(lr)
+        learning_rate = tf.placeholder(tf.float32, name='lr')
+        opt = tf.train.AdamOptimizer(learning_rate)
         accum_gradients = max(accum_gradients, 1)
         if accum_gradients > 1:
             train_op, zero_ops, accum_ops = \
@@ -148,6 +156,8 @@ def train(
         epoch_size = len(dataset) // step_tokens
 
         def save():
+            if find_lr:
+                return
             checkpoints_path.mkdir(exist_ok=True, parents=True)
             saver.save(sess, checkpoints_path / 'model', global_step=step)
             step_path.write_text(str(step) + '\n')
@@ -183,15 +193,24 @@ def train(
                     *_, mb_loss_value = sess.run(
                         accum_ops + [loss], feed_dict={context: mini_batch})
                     loss_value += mb_loss_value / accum_gradients
-                sess.run(train_op)
+                sess.run(train_op, feed_dict={learning_rate: lr})
             else:
                 _, loss_value = sess.run(
-                    [train_op, loss], feed_dict={context: batch})
-            if step % log_every == 0:
+                    [train_op, loss],
+                    feed_dict={context: batch, learning_rate: lr})
+            if step % log_every == 0 and not find_lr:
                 summary = tf.Summary()
                 summary.value.add(tag='loss', simple_value=loss_value)
+                summary.value.add(tag='learning_rate', simple_value=lr)
                 train_writer.add_summary(summary, step * step_tokens)
             return loss_value
+
+        if find_lr:
+            lr = 1e-6
+        max_lr = 10
+        lr_multiplier = 1.25
+        lr_data = []
+        find_lr_path = run_path / f'find-lr-{step}.png'
 
         avg_loss = (0.0, 0.0)
         try:
@@ -206,6 +225,12 @@ def train(
 
                     lv = train_step()
                     step += 1
+                    if find_lr:
+                        lr *= lr_multiplier
+                        if lr > max_lr or lr_data and lv > 2 * lr_data[0][1]:
+                            _plot_find_lr_data(lr_data, find_lr_path)
+                            return
+                        lr_data.append((lr, lv))
 
                     avg_loss = (avg_loss[0] * 0.99 + lv,
                                 avg_loss[1] * 0.99 + 1.0)
@@ -215,6 +240,7 @@ def train(
                         'loss': f'{lv:.2f}',
                         'avg': f'{avg:.2f}',
                     })
+            save()
 
         except KeyboardInterrupt:
             print('Interrupted, saving')
@@ -238,3 +264,13 @@ def _accum_gradients_ops(train_vars, opt, loss):
     train_op = opt.apply_gradients(
         [(accum_vars[i], gv[1]) for i, gv in enumerate(gvs)])
     return train_op, zero_ops, accum_ops
+
+
+def _plot_find_lr_data(lr_data: List[Tuple[float, float]], path: Path):
+    plt.figure(figsize=(12, 6))
+    plt.plot([lr for lr, _ in lr_data], [lv for _, lv in lr_data])
+    plt.xscale('log')
+    plt.xlabel('learning rate')
+    plt.ylabel('loss')
+    plt.savefig(path)
+    print(f'Saved lr range test to {path}')
