@@ -98,9 +98,7 @@ def train(
         loss = tf.reduce_mean(
             tf.nn.sparse_softmax_cross_entropy_with_logits(
                 labels=context[:, 1:], logits=output['logits'][:, :-1]))
-        tf.summary.scalar('loss', loss)
 
-        summaries = tf.summary.merge_all()
         summaries_path.mkdir(exist_ok=True, parents=True)
         train_writer = tf.summary.FileWriter(
             summaries_path / 'train', sess.graph)
@@ -179,20 +177,19 @@ def train(
             )
             if accum_gradients > 1:
                 sess.run(zero_ops)
+                loss_value = 0.
                 for i in range(accum_gradients):
                     mini_batch = batch[i * batch_size: (i + 1) * batch_size]
-                    ops = accum_ops
-                    if i == 0:
-                        ops = ops + [loss, summaries]
-                    res = sess.run(ops, feed_dict={context: mini_batch})
-                    if i == 0:
-                        loss_value, summary = res[-2:]
+                    *_, mb_loss_value = sess.run(
+                        accum_ops + [loss], feed_dict={context: mini_batch})
+                    loss_value += mb_loss_value / accum_gradients
                 sess.run(train_op)
             else:
-                _, loss_value, summary = sess.run(
-                    [train_op, loss, summaries],
-                    feed_dict={context: batch})
+                _, loss_value = sess.run(
+                    [train_op, loss], feed_dict={context: batch})
             if step % log_every == 0:
+                summary = tf.Summary()
+                summary.value.add(tag='loss', simple_value=loss_value)
                 train_writer.add_summary(summary, step * step_tokens)
             return loss_value
 
