@@ -24,6 +24,7 @@ gpt-2-tf-train \
     --config tiny \
     --epochs 1 \
     --log-every 2 \
+    --save-every 50 \
     --sample-every 50 \
     --sample-num 4 \
     --clean
@@ -35,8 +36,12 @@ gpt-2-tf-train \
     --batch-size 4 \
     --accum-gradients 2 \
     --config tiny \
-    --epochs 1 \
-    --log-every 2 \
-    --sample-every 50 \
-    --sample-num 4 \
     --find-lr
+
+gpt-2-tf-train \
+    tests/shakespeare-test-run/ \
+    tests/shakespeare-encoded/ \
+    tests/shakespeare/sp-model.model \
+    --batch-size 4 \
+    --config tiny \
+    --validate

@@ -41,7 +41,8 @@ def train(
         config='default',
         accum_gradients=1,  # accumulate gradients N times
         find_lr=False,  # instead of normal training, run lr range finder
-        clean=False,
+        validate=False,  # instead of training, run validation and exit
+        clean=False,  # clean run folder
         # override hparams from config
         n_ctx=None,
         n_embd=None,
@@ -67,16 +68,17 @@ def train(
     samples_path = run_path / 'samples'
     summaries_path = run_path / 'summaries'
     dataset_path = Path(dataset_path)
-    train_path = dataset_path / 'train.npy'
     if checkpoints_path.exists() and restore_from is None:
         restore_from = checkpoints_path
 
     hparams = model.HPARAMS[config]
     hparams.n_vocab = len(sp_model)
     if n_ctx is not None: hparams.n_ctx = n_ctx
+    n_ctx = hparams.n_ctx
     if n_embd is not None: hparams.n_embd = n_embd
     if n_head is not None: hparams.n_head = n_head
     if n_layer is not None: hparams.n_layer = n_layer
+    del n_layer, n_embd, n_head
     params_text = json.dumps(dict(
         hparams=hparams.values(),
         dataset_path=str(dataset_path),
@@ -89,13 +91,15 @@ def train(
         argv=sys.argv,
     ), indent=4, sort_keys=True)
     print(params_text)
-    (run_path / 'params.json').write_text(params_text)
+    if not (validate or find_lr):
+        (run_path / 'params.json').write_text(params_text)
 
     if sample_length is None:
-        sample_length = hparams.n_ctx - 1
-    elif sample_length > hparams.n_ctx:
+        sample_length = n_ctx - 1
+    elif sample_length > n_ctx:
         raise ValueError(
-            f'Can\'t get samples longer than window size: {hparams.n_ctx}')
+            f'Can\'t get samples longer than window size: {n_ctx}')
+    step_tokens = n_ctx * batch_size * accum_gradients
 
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
@@ -107,7 +111,7 @@ def train(
                 labels=context[:, 1:], logits=output['logits'][:, :-1]))
 
         summaries_path.mkdir(exist_ok=True, parents=True)
-        train_writer = tf.summary.FileWriter(
+        summary_writer = tf.summary.FileWriter(
             summaries_path / 'train', sess.graph)
 
         tf_sample = sample.sample_sequence(
@@ -140,10 +144,9 @@ def train(
             print(f'Loading checkpoint {ckpt}')
             saver.restore(sess, ckpt)
 
-        print(f'Loading dataset {train_path}')
-        dataset = np.load(train_path)
-        print(f'Dataset has {len(dataset):,} tokens')
-        print('Training...')
+        print(f'Loading dataset from {dataset_path}')
+        valid_dataset = np.load(dataset_path / 'valid.npy')
+        print(f'Validation dataset has {len(valid_dataset):,} tokens')
 
         step = 1
         step_path = checkpoints_path / 'step'
@@ -152,15 +155,18 @@ def train(
             # Add 1 so we don't immediately try to save again
             step = int(step_path.read_text()) + 1
 
-        step_tokens = hparams.n_ctx * batch_size * accum_gradients
-        epoch_size = len(dataset) // step_tokens
-
         def save():
             if find_lr:
                 return
             checkpoints_path.mkdir(exist_ok=True, parents=True)
             saver.save(sess, checkpoints_path / 'model', global_step=step)
             step_path.write_text(str(step) + '\n')
+
+        def write_summaries(**kwargs):
+            summary = tf.Summary()
+            for k, v in kwargs.items():
+                summary.value.add(tag=k, simple_value=v)
+            summary_writer.add_summary(summary, step * step_tokens)
 
         def generate_samples():
             context_tokens = [sp_model.PieceToId(END_OF_TEXT)]
@@ -179,10 +185,28 @@ def train(
             (samples_path / f'samples-{step}.txt').write_text(
                 '\n'.join(all_text))
 
+        def validation():
+            # TODO use more context here
+            loss_values = [
+                sess.run(loss, feed_dict={context: batch})
+                for batch in _valid_batch_generator(
+                    valid_dataset, batch_size=batch_size, n_ctx=n_ctx)]
+            return np.mean(loss_values)
+
+        if validate:
+            print('Validating...')
+            loss_value = validation()
+            print(f'Validation loss: {loss_value:.4f}')
+            return
+
+        train_dataset = np.load(dataset_path / 'train.npy')
+        print(f'Train dataset has {len(train_dataset):,} tokens')
+        epoch_size = len(train_dataset) // step_tokens
+
         def train_step():
             batch = _gen_batch(
-                dataset,
-                n_ctx=hparams.n_ctx,
+                train_dataset,
+                n_ctx=n_ctx,
                 batch_size=batch_size * accum_gradients,
             )
             if accum_gradients > 1:
@@ -199,10 +223,7 @@ def train(
                     [train_op, loss],
                     feed_dict={context: batch, learning_rate: lr})
             if step % log_every == 0 and not find_lr:
-                summary = tf.Summary()
-                summary.value.add(tag='loss', simple_value=loss_value)
-                summary.value.add(tag='learning_rate', simple_value=lr)
-                train_writer.add_summary(summary, step * step_tokens)
+                write_summaries(loss=loss_value, learning_rate=lr)
             return loss_value
 
         if find_lr:
@@ -212,6 +233,7 @@ def train(
         lr_data = []
         find_lr_path = run_path / f'find-lr-{step}.png'
 
+        print('Training...')
         avg_loss = (0.0, 0.0)
         try:
             for epoch in tqdm.trange(1, epochs + 1, desc='epoch'):
@@ -220,6 +242,8 @@ def train(
 
                     if step % save_every == 0:
                         save()
+                        valid_loss = validation()
+                        write_summaries(valid_loss=valid_loss)
                     if step % sample_every == 0:
                         generate_samples()
 
@@ -245,6 +269,7 @@ def train(
         except KeyboardInterrupt:
             print('Interrupted, saving')
             save()
+            sys.exit(1)
 
 
 def _gen_batch(dataset: np.ndarray, n_ctx: int, batch_size: int):
@@ -274,3 +299,22 @@ def _plot_find_lr_data(lr_data: List[Tuple[float, float]], path: Path):
     plt.ylabel('loss')
     plt.savefig(path)
     print(f'Saved lr range test to {path}')
+    # TODO - save results to json as well, to be able to re-plot
+
+
+def _valid_batch_generator(dataset, *, batch_size: int, n_ctx: int):
+    start_indices = range(0, len(dataset) - n_ctx, n_ctx)
+    return _batch_it(
+        (dataset[start_idx: start_idx + n_ctx] for start_idx in tqdm.tqdm(
+            start_indices, desc='validation', leave=False)),
+        batch_size=batch_size)
+
+
+def _batch_it(it, batch_size: int):
+    batch = []
+    for x in it:
+        batch.append(x)
+        if len(batch) == batch_size:
+            yield batch
+            batch = []
+    # last is dropped
