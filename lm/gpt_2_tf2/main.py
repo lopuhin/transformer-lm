@@ -22,11 +22,8 @@ class Model(tf.Module):
         self.b = tf.Variable(tf.zeros([n_vocab]), name='b')
 
     def __call__(self, x):
-        print('x', x.shape)
         h = tf.nn.embedding_lookup(self.emb, x)
-        print('h', h.shape)
         y = tf.nn.conv1d(h, self.w, 1, 'SAME') + self.b
-        print('y', y.shape)
         return y
 
 
@@ -38,13 +35,14 @@ def estimator_spec(
         config: tf.estimator.RunConfig = None,
         ) -> tf.estimator.EstimatorSpec:
     print(f'estimator_spec mode {mode}')
-    print(f'estimator_spec features {features}')
+    # print(f'estimator_spec features {features}')
     assert labels is None
     model = Model(n_vocab=params['n_vocab'], name='model')
     optimizer = tf.compat.v1.train.AdamOptimizer()
     global_step = tf.compat.v1.train.get_or_create_global_step()
-    print('trainable_variables', model.trainable_variables)
+    # print('trainable_variables', model.trainable_variables)
     # TODO do we need tf.function somewhere?
+    # TODO gradient accumulation (maybe check 0128fcb again)
 
     logits = model(features)
     loss = tf.reduce_mean(
@@ -76,28 +74,55 @@ def main(
     train_dataset = np.load(dataset_path / 'train.npy')
     print(f'Train dataset has {len(train_dataset):,} tokens')
 
-    # TODO handle config
+    # TODO handle hyperparameters config
     n_ctx = 32
     batch_size = 4
 
+    run_config = tf.estimator.RunConfig(
+        save_summary_steps=10,
+    )
     estimator = tf.estimator.Estimator(
         estimator_spec,
         model_dir=run_path,
         params={
             'n_vocab': len(sp_model),
         },
+        config=run_config,
     )
     estimator.train(
-        input_fn=partial(_gen_batch, train_dataset, n_ctx, batch_size),
-        steps=5,
+        input_fn=partial(_train_batch, train_dataset, n_ctx, batch_size),
+        steps=100,
     )
+    valid_iter = _valid_iter(valid_dataset[:1000], batch_size=batch_size, n_ctx=n_ctx)
+    eval_result = estimator.evaluate(lambda: next(valid_iter), steps=100)
+    import IPython; IPython.embed()
 
 
-def _gen_batch(dataset: np.ndarray, n_ctx: int, batch_size: int):
+def _train_batch(dataset: np.ndarray, n_ctx: int, batch_size: int):
+    print('************************* _train_batch')
+    tf.print('**********************fo00')
     indices = [np.random.randint(0, len(dataset) - n_ctx)
                for _ in range(batch_size)]
     features = [dataset[idx : idx + n_ctx] for idx in indices]
     return np.array(features, dtype=np.int32), None
+
+
+def _valid_iter(dataset, *, batch_size: int, n_ctx: int):
+    start_indices = range(0, len(dataset) - n_ctx, n_ctx)
+    return _batch_it(
+        (dataset[start_idx: start_idx + n_ctx] for start_idx in start_indices),
+        batch_size=batch_size)
+
+
+def _batch_it(it, batch_size: int):
+    batch = []
+    for x in it:
+        batch.append(x)
+        if len(batch) == batch_size:
+            print('yielding batch')
+            yield np.array(batch, dtype=np.int32), None
+            batch = []
+    # last is dropped
 
 
 def fire_main():
