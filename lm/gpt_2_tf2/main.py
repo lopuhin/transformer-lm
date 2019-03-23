@@ -41,25 +41,21 @@ def estimator_spec(
     print(f'estimator_spec features {features}')
     assert labels is None
     model = Model(n_vocab=params['n_vocab'], name='model')
-    optimizer = tf.optimizers.Adam(learning_rate=0.1)
+    optimizer = tf.compat.v1.train.AdamOptimizer()
+    global_step = tf.compat.v1.train.get_or_create_global_step()
     print('trainable_variables', model.trainable_variables)
     # TODO do we need tf.function somewhere?
 
-    with tf.GradientTape() as tape:
-        logits = model(features)
-        loss = tf.reduce_mean(
-            tf.nn.sparse_softmax_cross_entropy_with_logits(
-                labels=features[:, 1:],
-                logits=logits[:, :-1]))
-
-    gradients = tape.gradient(loss, model.trainable_variables)
-    train_op = optimizer.apply_gradients(
-        zip(gradients, model.trainable_variables))
+    logits = model(features)
+    loss = tf.reduce_mean(
+        tf.nn.sparse_softmax_cross_entropy_with_logits(
+            labels=features[:, 1:],
+            logits=logits[:, :-1]))
 
     return tf.estimator.EstimatorSpec(
         mode=mode,
         loss=loss,
-        train_op=train_op,
+        train_op=optimizer.minimize(loss, global_step),
     )
 
 
@@ -95,7 +91,6 @@ def main(
         input_fn=partial(_gen_batch, train_dataset, n_ctx, batch_size),
         steps=5,
     )
-    import IPython; IPython.embed()
 
 
 def _gen_batch(dataset: np.ndarray, n_ctx: int, batch_size: int):
