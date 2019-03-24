@@ -69,11 +69,6 @@ def main():
         train_loss = tf.keras.metrics.Mean(name='train_loss')
         test_loss = tf.keras.metrics.Mean(name='test_loss')
 
-        train_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(
-            name='train_accuracy')
-        test_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(
-            name='test_accuracy')
-
         model = create_model()
         optimizer = tf.keras.optimizers.Adam()
         checkpoint = tf.train.Checkpoint(optimizer=optimizer, model=model)
@@ -89,16 +84,12 @@ def main():
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
 
             train_loss(loss)
-            train_accuracy(labels, predictions)
 
         def test_step(inputs):
             images, labels = inputs
-
             predictions = model(images, training=False)
             t_loss = loss_object(labels, predictions)
-
             test_loss(t_loss)
-            test_accuracy(labels, predictions)
 
         @tf.function
         def distributed_train():
@@ -124,40 +115,12 @@ def main():
             if epoch % 2 == 0:
                 checkpoint.save(checkpoint_prefix)
 
-            template = ("Epoch {}, Loss: {}, Accuracy: {}, Test Loss: {}, "
-                        "Test Accuracy: {}")
+            template = 'Epoch {}, Loss: {} Test Loss: {}'
             print(template.format(epoch + 1, train_loss.result(),
-                                  train_accuracy.result() * 100,
-                                  test_loss.result(),
-                                  test_accuracy.result() * 100))
+                                  test_loss.result()))
 
             train_loss.reset_states()
             test_loss.reset_states()
-            train_accuracy.reset_states()
-            test_accuracy.reset_states()
-
-    eval_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(
-        name='eval_accuracy')
-
-    new_model = create_model()
-    new_optimizer = tf.keras.optimizers.Adam()
-
-    test_dataset = tf.data.Dataset.from_tensor_slices(
-        (test_images, test_labels)).batch(BATCH_SIZE)
-
-    @tf.function
-    def eval_step(images, labels):
-        predictions = new_model(images, training=False)
-        eval_accuracy(labels, predictions)
-
-    checkpoint = tf.train.Checkpoint(optimizer=new_optimizer, model=new_model)
-    checkpoint.restore(tf.train.latest_checkpoint(checkpoint_dir))
-
-    for images, labels in test_dataset:
-        eval_step(images, labels)
-
-    print('Accuracy after restoring the saved model without strategy: {}'
-          .format(eval_accuracy.result() * 100))
 
 
 if __name__ == '__main__':
