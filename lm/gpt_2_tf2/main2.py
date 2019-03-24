@@ -16,10 +16,29 @@ from lm.fire_utils import only_allow_defined_args
 def create_model(vocab_size):
     model = tf.keras.Sequential([
         tf.keras.layers.Embedding(vocab_size, 64),
-        tf.keras.layers.Dense(vocab_size, activation='softmax')
+        tf.keras.layers.Dense(vocab_size),
     ])
-    print('model', model)
+    print('model', model.summary())
     return model
+
+
+# FIXME this does not train for some reason
+class Model(tf.Module):
+    def __init__(self, n_vocab, name=None):
+        super().__init__(name=name)
+        embedding_size = 64
+        self.emb = tf.Variable(
+            tf.random.uniform([n_vocab, embedding_size], minval=-0.1, maxval=0.1),
+            name='emb')
+        self.w = tf.Variable(
+            tf.random.normal([1, embedding_size, n_vocab], stddev=0.05),
+            name='w')
+        self.b = tf.Variable(tf.zeros([n_vocab]), name='b')
+
+    def __call__(self, x):
+        h = tf.nn.embedding_lookup(self.emb, x)
+        y = tf.nn.conv1d(h, self.w, 1, 'SAME') + self.b
+        return y
 
 
 @only_allow_defined_args
@@ -37,7 +56,6 @@ def main(
 
     dataset_path = Path(dataset_path)
     print(f'Loading dataset from {dataset_path}')
-    # TODO
     valid_dataset = np.load(dataset_path / 'valid.npy')
     train_dataset = np.load(dataset_path / 'train.npy')
     print(f'Train dataset has {len(train_dataset):,} tokens')
@@ -59,38 +77,40 @@ def main(
     valid_indices = range(0, len(valid_dataset) - n_ctx, n_ctx)
     valid_contexts = [valid_dataset[idx: idx + n_ctx] for idx in valid_indices]
 
+    # Create a checkpoint directory to store the checkpoints.
+    run_path = Path(run_path)
+    checkpoint_path = run_path / 'checkpoints'
+
+    loss_fn = lambda labels, logits: \
+        tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
+            labels=labels, logits=logits))
+    train_loss = tf.keras.metrics.Mean(name='train_loss')
+    valid_loss = tf.keras.metrics.Mean(name='valid_loss')
+
     with strategy.scope():
         train_iterator = strategy.experimental_make_numpy_iterator(
             train_contexts, batch_size, shuffle=None)
         valid_iterator = strategy.experimental_make_numpy_iterator(
             valid_contexts, batch_size, shuffle=None)
 
-    # Create a checkpoint directory to store the checkpoints.
-    run_path = Path(run_path)
-    checkpoint_path = run_path / 'checkpoints'
-
-    with strategy.scope():
-        # TODO sparse_softmax_cross_entropy_with_logits
-        loss_object = tf.keras.losses.SparseCategoricalCrossentropy()
-
-        train_loss = tf.keras.metrics.Mean(name='train_loss')
-        valid_loss = tf.keras.metrics.Mean(name='valid_loss')
-
-        model = create_model(vocab_size=len(sp_model))
-        optimizer = tf.keras.optimizers.Adam()
+        # model = Model(n_vocab=len(sp_model))
+        model = create_model(len(sp_model))
+        optimizer = tf.optimizers.Adam()
         checkpoint = tf.train.Checkpoint(optimizer=optimizer, model=model)
 
         def train_step(context):
+            context = tf.cast(context, tf.int32)
             with tf.GradientTape() as tape:
-                predictions = model(context, training=True)
-                loss = loss_object(context[:, 1:], predictions[:, :-1])
+                logits = model(context)
+                loss = loss_fn(context[:, 1:], logits[:, :-1])
             gradients = tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
             train_loss(loss)
 
         def valid_step(context):
-            predictions = model(context, training=False)
-            loss = loss_object(context[:, 1:], predictions[:, :-1])
+            context = tf.cast(context, tf.int32)
+            logits = model(context)
+            loss = loss_fn(context[:, 1:], logits[:, :-1])
             valid_loss(loss)
 
         @tf.function
