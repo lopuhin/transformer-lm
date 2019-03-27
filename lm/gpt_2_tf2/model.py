@@ -9,14 +9,15 @@ import tensorflow as tf
 
 @attr.s(auto_attribs=True)
 class HParams:
-   n_ctx: int
-   n_embed: int
-   n_head: int
-   n_layer: int
+    n_ctx: int
+    n_embed: int
+    n_head: int
+    n_layer: int
 
 
 def shape_list(x):
-    """Deal with dynamic shape in tensorflow cleanly."""
+    """ Deal with dynamic shape in tensorflow cleanly.
+    """
     static = x.shape.as_list()
     dynamic = tf.shape(input=x)
     return [dynamic[i] if s is None else s for i, s in enumerate(static)]
@@ -33,28 +34,34 @@ def gelu(x):
 
 
 def norm(x, scope, *, axis=-1, epsilon=1e-5):
-    """Normalize to mean = 0, std = 1, then do a diagonal affine transform."""
+    """ Normalize to mean = 0, std = 1, then do a diagonal affine transform.
+    """
     with tf.compat.v1.variable_scope(scope):
         n_state = x.shape[-1].value
         g = tf.compat.v1.get_variable(
-            'g', [n_state], initializer=tf.compat.v1.initializers.constant(1), use_resource=False)
+            'g', [n_state], initializer=tf.compat.v1.initializers.constant(1),
+            use_resource=False)
         b = tf.compat.v1.get_variable(
-            'b', [n_state], initializer=tf.compat.v1.initializers.constant(0), use_resource=False)
+            'b', [n_state], initializer=tf.compat.v1.initializers.constant(0),
+            use_resource=False)
         u = tf.reduce_mean(input_tensor=x, axis=axis, keepdims=True)
-        s = tf.reduce_mean(input_tensor=tf.square(x-u), axis=axis, keepdims=True)
+        s = tf.reduce_mean(input_tensor=tf.square(x-u), axis=axis,
+                           keepdims=True)
         x = (x - u) * tf.math.rsqrt(s + epsilon)
         x = x*g + b
         return x
 
 
 def split_states(x, n):
-    """Reshape the last dimension of x into [n, x.shape[-1]/n]."""
+    """ Reshape the last dimension of x into [n, x.shape[-1]/n].
+    """
     *start, m = shape_list(x)
     return tf.reshape(x, start + [n, m//n])
 
 
 def merge_states(x):
-    """Smash the last two dimensions of x into a single dimension."""
+    """ Smash the last two dimensions of x into a single dimension.
+    """
     *start, a, b = shape_list(x)
     return tf.reshape(x, start + [a*b])
 
@@ -64,8 +71,13 @@ def conv1d(x, scope, nf, *, w_init_stdev=0.02):
         *start, nx = shape_list(x)
         w = tf.compat.v1.get_variable(
             'w', [1, nx, nf],
-            initializer=tf.compat.v1.initializers.random_normal(stddev=w_init_stdev), use_resource=False)
-        b = tf.compat.v1.get_variable('b', [nf], initializer=tf.compat.v1.initializers.constant(0), use_resource=False)
+            initializer=
+            tf.compat.v1.initializers.random_normal(stddev=w_init_stdev),
+            use_resource=False)
+        b = tf.compat.v1.get_variable(
+            'b', [nf],
+            initializer=tf.compat.v1.initializers.constant(0),
+            use_resource=False)
         c = tf.reshape(
             tf.matmul(tf.reshape(x, [-1, nx]), tf.reshape(w, [-1, nf])) + b,
             start + [nf])
@@ -73,7 +85,7 @@ def conv1d(x, scope, nf, *, w_init_stdev=0.02):
 
 
 def attention_mask(nd, ns, *, dtype):
-    """1's in the lower triangle, counting from the lower right corner.
+    """ 1's in the lower triangle, counting from the lower right corner.
     Same as tf.matrix_band_part(tf.ones([nd, ns]), -1, ns-nd),
     but doesn't produce garbage on TPUs.
     """
@@ -92,7 +104,8 @@ def attn(x, scope, n_state, *, past, hparams: HParams):
 
     def split_heads(x):
         # From [batch, sequence, features] to [batch, heads, sequence, features]
-        return tf.transpose(a=split_states(x, hparams.n_head), perm=[0, 2, 1, 3])
+        return tf.transpose(
+            a=split_states(x, hparams.n_head), perm=[0, 2, 1, 3])
 
     def merge_heads(x):
         # Reverse of split_heads
@@ -156,36 +169,40 @@ def past_shape(*, hparams: HParams, batch_size=None, sequence=None):
 
 
 def expand_tile(value, size):
-    """Add a new axis of given size."""
+    """Add a new axis of given size.
+    """
     value = tf.convert_to_tensor(value=value, name='value')
-    ndims = value.shape.ndims
-    return tf.tile(tf.expand_dims(value, axis=0), [size] + [1]*ndims)
+    n_dims = value.shape.ndims
+    return tf.tile(tf.expand_dims(value, axis=0), [size] + [1] * n_dims)
 
 
 def positions_for(tokens, past_length):
     batch_size = tf.shape(input=tokens)[0]
-    nsteps = tf.shape(input=tokens)[1]
-    return expand_tile(past_length + tf.range(nsteps), batch_size)
+    n_steps = tf.shape(input=tokens)[1]
+    return expand_tile(past_length + tf.range(n_steps), batch_size)
 
 
-def model(hparams: HParams, n_vocab: int, X, past=None, scope='model', reuse=False):
+def model(hparams: HParams, n_vocab: int, X, past=None, scope='model',
+          reuse=False):
     with tf.compat.v1.variable_scope(scope, reuse=reuse):
         results = {}
         batch, sequence = shape_list(X)
 
         wpe = tf.compat.v1.get_variable(
             'wpe', [hparams.n_ctx, hparams.n_embed],
-            initializer=tf.compat.v1.initializers.random_normal(stddev=0.01), use_resource=False)
+            initializer=tf.compat.v1.initializers.random_normal(stddev=0.01),
+            use_resource=False)
         wte = tf.compat.v1.get_variable(
             'wte', [n_vocab, hparams.n_embed],
-            initializer=tf.compat.v1.initializers.random_normal(stddev=0.02), use_resource=False)
+            initializer=tf.compat.v1.initializers.random_normal(stddev=0.02),
+            use_resource=False)
         past_length = 0 if past is None else tf.shape(input=past)[-2]
         h = tf.gather(wte, X) + tf.gather(wpe, positions_for(X, past_length))
 
         # Transformer
         presents = []
-        pasts = tf.unstack(past, axis=1) if past is not None else \
-            [None] * hparams.n_layer
+        pasts = (tf.unstack(past, axis=1) if past is not None else
+                 [None] * hparams.n_layer)
         assert len(pasts) == hparams.n_layer
         for layer, past in enumerate(pasts):
             h, present = block(h, 'h%d' % layer, past=past, hparams=hparams)
