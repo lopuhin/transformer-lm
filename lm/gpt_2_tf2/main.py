@@ -1,73 +1,53 @@
-from functools import partial
+"""
+Training loop, based on
+https://www.tensorflow.org/alpha/tutorials/distribute/training_loops
+"""
 from pathlib import Path
-from typing import Dict
+import shutil
 
 import fire
 import numpy as np
 import sentencepiece as spm
 import tensorflow as tf
+import tqdm
 
-from ..fire_utils import only_allow_defined_args
-
-
-class Model(tf.Module):
-    def __init__(self, n_vocab, name=None):
-        super().__init__(name=name)
-        embedding_size = 64
-        self.emb = tf.Variable(
-            tf.random.uniform([n_vocab, embedding_size]), name='emb')
-        self.w = tf.Variable(
-            tf.random.normal([1, embedding_size, n_vocab], stddev=0.05),
-            name='w')
-        self.b = tf.Variable(tf.zeros([n_vocab]), name='b')
-
-    def __call__(self, x):
-        h = tf.nn.embedding_lookup(self.emb, x)
-        y = tf.nn.conv1d(h, self.w, 1, 'SAME') + self.b
-        return y
+from lm.fire_utils import only_allow_defined_args
 
 
-def estimator_spec(
-        features: tf.Tensor,
-        labels,
-        mode:   tf.estimator.ModeKeys,
-        params: Dict = None,
-        config: tf.estimator.RunConfig = None,
-        ) -> tf.estimator.EstimatorSpec:
-    print(f'estimator_spec mode {mode}')
-    # print(f'estimator_spec features {features}')
-    assert labels is None
-    model = Model(n_vocab=params['n_vocab'], name='model')
-    optimizer = tf.compat.v1.train.AdamOptimizer()
-    global_step = tf.compat.v1.train.get_or_create_global_step()
-    # print('trainable_variables', model.trainable_variables)
-    # TODO do we need tf.function somewhere?
-    # TODO gradient accumulation (maybe check 0128fcb again)
+class Model(tf.keras.Model):
+    def __init__(self, n_vocab: int):
+        super().__init__()
+        self.vocab_size = n_vocab
+        self.embedding = tf.keras.layers.Embedding(n_vocab, 64)
+        self.out = tf.keras.layers.Dense(n_vocab)
 
-    logits = model(features)
-    loss = tf.reduce_mean(
-        tf.nn.sparse_softmax_cross_entropy_with_logits(
-            labels=features[:, 1:],
-            logits=logits[:, :-1]))
-
-    return tf.estimator.EstimatorSpec(
-        mode=mode,
-        loss=loss,
-        train_op=optimizer.minimize(loss, global_step),
-    )
+    def call(self, context):
+        x = self.embedding(context)
+        return self.out(x)
 
 
 @only_allow_defined_args
 def main(
+        run_path,
         dataset_path,
         sp_model_path,
-        run_path=None,
-        batch_size=4,
-        n_ctx=64,
-        n_embd=64,
+        n_ctx=32,
+        batch_size_per_replica=4,
+        n_embed=64,
         n_head=4,
         n_layer=4,
+        epochs=2,
+        clean=False,  # clean run folder
         ):
+
+    run_path = Path(run_path)
+    run_path_mark = run_path / '.lm'
+    if clean and run_path.exists():
+        assert run_path_mark.exists()  # to avoid removing unrelated folder
+        shutil.rmtree(run_path)
+    run_path.mkdir(exist_ok=True, parents=True)
+    run_path_mark.touch()
+    checkpoint_prefix = run_path / 'checkpoints' / 'model'
 
     sp_model = spm.SentencePieceProcessor()
     sp_model.load(sp_model_path)
@@ -75,58 +55,85 @@ def main(
     dataset_path = Path(dataset_path)
     print(f'Loading dataset from {dataset_path}')
     valid_dataset = np.load(dataset_path / 'valid.npy')
-    print(f'Validation dataset has {len(valid_dataset):,} tokens')
     train_dataset = np.load(dataset_path / 'train.npy')
     print(f'Train dataset has {len(train_dataset):,} tokens')
+    print(f'Validation dataset has {len(valid_dataset):,} tokens')
 
-    # TODO handle hyperparameters config
+    strategy = tf.distribute.MirroredStrategy()
+    batch_size = batch_size_per_replica * strategy.num_replicas_in_sync
+    print('Number of devices: {}'.format(strategy.num_replicas_in_sync))
 
-    run_config = tf.estimator.RunConfig(
-        save_summary_steps=10,
-    )
-    estimator = tf.estimator.Estimator(
-        estimator_spec,
-        model_dir=run_path,
-        params={
-            'n_vocab': len(sp_model),
-        },
-        config=run_config,
-    )
-    estimator.train(
-        input_fn=partial(_train_batch, train_dataset, n_ctx, batch_size),
-        steps=100,
-    )
-    valid_iter = _valid_iter(
-        valid_dataset[:1000], batch_size=batch_size, n_ctx=n_ctx)
-    eval_result = estimator.evaluate(lambda: next(valid_iter), steps=100)
-    import IPython; IPython.embed()
+    step_tokens = n_ctx * batch_size
+    train_steps_per_epoch = len(train_dataset) // step_tokens
+    valid_steps_per_epoch = len(valid_dataset) // step_tokens
 
+    # TODO check that memory usage is ok
+    # TODO: re-create each epoch (or change experimental_make_numpy_iterator)
+    train_indices = [np.random.randint(0, len(train_dataset) - n_ctx)
+                     for _ in range(len(train_dataset) // n_ctx)]
+    train_contexts = [train_dataset[idx: idx + n_ctx] for idx in train_indices]
+    valid_indices = range(0, len(valid_dataset) - n_ctx, n_ctx)
+    valid_contexts = [valid_dataset[idx: idx + n_ctx] for idx in valid_indices]
 
-def _train_batch(dataset: np.ndarray, n_ctx: int, batch_size: int):
-    print('************************* _train_batch')
-    tf.print('**********************fo00')
-    indices = [np.random.randint(0, len(dataset) - n_ctx)
-               for _ in range(batch_size)]
-    features = [dataset[idx : idx + n_ctx] for idx in indices]
-    return np.array(features, dtype=np.int32), None
+    loss_fn = lambda labels, logits: \
+        tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
+            labels=labels, logits=logits))
+    train_loss = tf.keras.metrics.Mean(name='train_loss')
+    valid_loss = tf.keras.metrics.Mean(name='valid_loss')
 
+    with strategy.scope():
+        train_iterator = strategy.experimental_make_numpy_iterator(
+            train_contexts, batch_size, shuffle=None)
+        valid_iterator = strategy.experimental_make_numpy_iterator(
+            valid_contexts, batch_size, shuffle=None)
 
-def _valid_iter(dataset, *, batch_size: int, n_ctx: int):
-    start_indices = range(0, len(dataset) - n_ctx, n_ctx)
-    return _batch_it(
-        (dataset[start_idx: start_idx + n_ctx] for start_idx in start_indices),
-        batch_size=batch_size)
+        model = Model(n_vocab=len(sp_model))
+        optimizer = tf.optimizers.Adam()
+        checkpoint = tf.train.Checkpoint(optimizer=optimizer, model=model)
 
+        def train_step(context):
+            context = tf.cast(context, tf.int32)
+            with tf.GradientTape() as tape:
+                logits = model(context)
+                loss = loss_fn(context[:, 1:], logits[:, :-1])
+            gradients = tape.gradient(loss, model.trainable_variables)
+            optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+            train_loss(loss)
 
-def _batch_it(it, batch_size: int):
-    batch = []
-    for x in it:
-        batch.append(x)
-        if len(batch) == batch_size:
-            print('yielding batch')
-            yield np.array(batch, dtype=np.int32), None
-            batch = []
-    # last is dropped
+        def valid_step(context):
+            context = tf.cast(context, tf.int32)
+            logits = model(context)
+            loss = loss_fn(context[:, 1:], logits[:, :-1])
+            valid_loss(loss)
+
+        @tf.function
+        def distributed_train():
+            return strategy.experimental_run(train_step, train_iterator)
+
+        @tf.function
+        def distributed_validate():
+            return strategy.experimental_run(valid_step, valid_iterator)
+
+        for epoch in range(epochs):
+
+            train_iterator.initialize()
+            train_pbar = tqdm.trange(train_steps_per_epoch, desc='train')
+            for _ in train_pbar:
+                distributed_train()
+                train_pbar.set_postfix(loss=f'{train_loss.result():.4f}')
+
+            valid_iterator.initialize()
+            for _ in tqdm.trange(valid_steps_per_epoch, desc='validate'):
+                distributed_validate()
+
+            checkpoint.save(checkpoint_prefix)
+
+            print(f'epoch: {epoch + 1}, '
+                  f'train_loss: {train_loss.result():.4f}, '
+                  f'valid_loss: {valid_loss.result():.4f}')
+
+            train_loss.reset_states()
+            valid_loss.reset_states()
 
 
 def fire_main():
