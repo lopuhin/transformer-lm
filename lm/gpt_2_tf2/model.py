@@ -1,18 +1,192 @@
 """
 Based on https://github.com/openai/gpt-2/blob/master/src/model.py,
-converted to TF 2.0
+converted to TF 2.0 Keras API.
 """
 import attr
 import numpy as np
 import tensorflow as tf
 
 
-@attr.s(auto_attribs=True)
+@attr.s(auto_attribs=True, frozen=True)
 class HParams:
+    n_vocab: int
     n_ctx: int
     n_embed: int
     n_head: int
     n_layer: int
+
+
+class Model(tf.keras.Model):
+    def __init__(self, hparams: HParams, name=None):
+        super().__init__(name=name)
+        self.hparams = hparams
+        self.wpe = tf.Variable(
+            tf.random.normal([hparams.n_ctx, hparams.n_embed], stddev=0.01))
+        self.wte = tf.Variable(
+            tf.random.normal([hparams.n_vocab, hparams.n_embed], stddev=0.02))
+        self.blocks = tf.keras.Sequential([
+            Block(hparams, name=f'h{i}') for i in range(hparams.n_layer)
+        ])
+        self.ln_f = Norm()
+
+    def call(self, x, past=None):
+        results = {}
+        batch, sequence = shape_list(x)  # TODO simplify shape stuff?
+        past_length = 0 if past is None else tf.shape(input=past)[-2]
+        h = (tf.gather(self.wte, x) +
+             tf.gather(self.wpe, positions_for(x, past_length)))
+
+        # Transformer
+        presents = []
+        pasts = (tf.unstack(past, axis=1) if past is not None else
+                 [None] * self.hparams.n_layer)
+        assert len(pasts) == self.hparams.n_layer
+        for i, past in enumerate(pasts):
+            h, present = self.blocks.layers[i](h, past=past)
+            presents.append(present)
+        results['present'] = tf.stack(presents, axis=1)
+        h = self.ln_f(h)
+
+        # Language model loss.  Do tokens <n predict token n?
+        h_flat = tf.reshape(h, [batch * sequence, self.hparams.n_embed])
+        logits = tf.matmul(h_flat, self.wte, transpose_b=True)
+        logits = tf.reshape(logits, [batch, sequence, self.hparams.n_vocab])
+        results['logits'] = logits
+        return results
+
+
+class Block(tf.keras.layers.Layer):
+    def __init__(self, hparams: HParams, name=None):
+        super().__init__(name=name)
+        self.hparams = hparams
+
+    def build(self, input_shape):
+        nx = input_shape[-1]
+        self.ln_1 = Norm()
+        self.ln_2 = Norm()
+        self.mlp = MLP(nx * 4)
+        self.attn = Attention(nx, hparams=self.hparams)
+
+    def call(self, x, past):
+        a, present = self.attn(self.ln_1(x), past=past)
+        x = x + a
+        m = self.mlp(self.ln_2(x))
+        x = x + m
+        return x, present
+
+
+class Norm(tf.keras.layers.Layer):
+    """ Normalize to mean = 0, std = 1, then do a diagonal affine transform.
+    """
+    def __init__(self, *, axis=-1, epsilon=1e-5, name=None):
+        super().__init__(name=name)
+        self.axis = axis
+        self.epsilon = epsilon
+
+    def build(self, input_shape):
+        n_state = input_shape[-1]
+        self.g = tf.Variable(tf.constant(1, shape=[n_state], dtype=tf.float32))
+        self.b = tf.Variable(tf.constant(0, shape=[n_state], dtype=tf.float32))
+
+    def call(self, x):
+        u = tf.reduce_mean(input_tensor=x, axis=self.axis, keepdims=True)
+        s = tf.reduce_mean(input_tensor=tf.square(x-u), axis=self.axis,
+                           keepdims=True)
+        x = (x - u) * tf.math.rsqrt(s + self.epsilon)
+        x = x * self.g + self.b
+        return x
+
+
+class MLP(tf.keras.layers.Layer):
+    def __init__(self, n_state: int, name=None):
+        super().__init__(name=name)
+        self.n_state = n_state
+
+    def build(self, input_shape):
+        nx = input_shape[-1]
+        self.c_fc = Conv1D(self.n_state)
+        self.c_proj = Conv1D(nx)
+
+    def call(self, x):
+        h = gelu(self.c_fc(x))
+        h2 = self.c_proj(h)
+        return h2
+
+
+class Conv1D(tf.keras.layers.Layer):
+    def __init__(self, n_state: int, w_init_stdev=0.02, name=None):
+        super().__init__(name=name)
+        self.n_state = n_state
+        self.w_init_stdev = w_init_stdev
+
+    def build(self, input_shape):
+        *self.start, self.nx = input_shape
+        self.w = tf.Variable(tf.random.normal([1, self.nx, self.n_state],
+                                              stddev=self.w_init_stdev))
+        self.b = tf.Variable(tf.constant(0, [self.n_state], dtype=tf.float32))
+
+    def call(self, x):
+        return tf.reshape(
+            tf.matmul(tf.reshape(x, [-1, self.nx]),
+                      tf.reshape(self.w, [-1, self.nf])) + self.b,
+            self.start + [self.nf])
+
+
+class Attention(tf.keras.layers.Layer):
+    def __init__(self, n_state: int, hparams: HParams, name=None):
+        super().__init__(name=name)
+        self.hparams = hparams
+        self.c_attn = Conv1D(n_state * 3)
+        self.c_proj = Conv1D(n_state)
+        assert n_state % hparams.n_head == 0
+
+    def call(self, x, past):
+        assert x.shape.ndims == 3  # Should be [batch, sequence, features]
+        if past is not None:
+            # Should be [batch, 2, heads, sequence, features], where 2 is [k, v]
+            assert past.shape.ndims == 5
+        c = self.c_attn(x)
+        q, k, v = map(self.split_heads, tf.split(c, 3, axis=2))
+        present = tf.stack([k, v], axis=1)
+        if past is not None:
+            pk, pv = tf.unstack(past, axis=1)
+            k = tf.concat([pk, k], axis=-2)
+            v = tf.concat([pv, v], axis=-2)
+        a = self.multihead_attn(q, k, v)
+        a = self.merge_heads(a)
+        a = self.c_proj(a)
+        return a, present
+
+    def split_heads(self, x):
+        """ From [batch, sequence, features] to
+        [batch, heads, sequence, features].
+        """
+        return tf.transpose(
+            a=split_states(x, self.hparams.n_head), perm=[0, 2, 1, 3])
+
+    def merge_heads(self, x):
+        """ Reverse of split_heads.
+        """
+        return merge_states(tf.transpose(a=x, perm=[0, 2, 1, 3]))
+
+    def mask_attn_weights(self, w):
+        # w has shape [batch, heads, dst_sequence, src_sequence],
+        # where information flows from src to dst.
+        _, _, nd, ns = shape_list(w)
+        b = attention_mask(nd, ns, dtype=w.dtype)
+        b = tf.reshape(b, [1, 1, nd, ns])
+        w = w*b - tf.cast(1e10, w.dtype)*(1-b)
+        return w
+
+    def multihead_attn(self, q, k, v):
+        # q, k, v have shape [batch, heads, sequence, features]
+        w = tf.matmul(q, k, transpose_b=True)
+        w = w * tf.math.rsqrt(tf.cast(v.shape[-1].value, w.dtype))
+
+        w = self.mask_attn_weights(w)
+        w = softmax(w)
+        a = tf.matmul(w, v)
+        return a
 
 
 def shape_list(x):
@@ -182,7 +356,7 @@ def positions_for(tokens, past_length):
     return expand_tile(past_length + tf.range(n_steps), batch_size)
 
 
-def model(hparams: HParams, n_vocab: int, X, past=None, scope='model',
+def model(hparams: HParams, X, past=None, scope='model',
           reuse=False):
     with tf.compat.v1.variable_scope(scope, reuse=reuse):
         results = {}
@@ -193,7 +367,7 @@ def model(hparams: HParams, n_vocab: int, X, past=None, scope='model',
             initializer=tf.compat.v1.initializers.random_normal(stddev=0.01),
             use_resource=False)
         wte = tf.compat.v1.get_variable(
-            'wte', [n_vocab, hparams.n_embed],
+            'wte', [hparams.n_vocab, hparams.n_embed],
             initializer=tf.compat.v1.initializers.random_normal(stddev=0.02),
             use_resource=False)
         past_length = 0 if past is None else tf.shape(input=past)[-2]
@@ -213,6 +387,6 @@ def model(hparams: HParams, n_vocab: int, X, past=None, scope='model',
         # Language model loss.  Do tokens <n predict token n?
         h_flat = tf.reshape(h, [batch*sequence, hparams.n_embed])
         logits = tf.matmul(h_flat, wte, transpose_b=True)
-        logits = tf.reshape(logits, [batch, sequence, n_vocab])
+        logits = tf.reshape(logits, [batch, sequence, hparams.n_vocab])
         results['logits'] = logits
         return results

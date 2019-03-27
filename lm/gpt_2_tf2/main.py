@@ -11,19 +11,8 @@ import sentencepiece as spm
 import tensorflow as tf
 import tqdm
 
-from lm.fire_utils import only_allow_defined_args
-
-
-class Model(tf.keras.Model):
-    def __init__(self, n_vocab: int):
-        super().__init__()
-        self.vocab_size = n_vocab
-        self.embedding = tf.keras.layers.Embedding(n_vocab, 64)
-        self.out = tf.keras.layers.Dense(n_vocab)
-
-    def call(self, context):
-        x = self.embedding(context)
-        return self.out(x)
+from ..fire_utils import only_allow_defined_args
+from .model import Model, HParams
 
 
 @only_allow_defined_args
@@ -51,6 +40,14 @@ def main(
 
     sp_model = spm.SentencePieceProcessor()
     sp_model.load(sp_model_path)
+
+    hparams = HParams(
+        n_vocab=len(sp_model),
+        n_ctx=n_ctx,
+        n_embed=n_embed,
+        n_head=n_head,
+        n_layer=n_layer,
+    )
 
     dataset_path = Path(dataset_path)
     print(f'Loading dataset from {dataset_path}')
@@ -87,7 +84,7 @@ def main(
         valid_iterator = strategy.experimental_make_numpy_iterator(
             valid_contexts, batch_size, shuffle=None)
 
-        model = Model(n_vocab=len(sp_model))
+        model = Model(hparams)
         optimizer = tf.optimizers.Adam()
         checkpoint = tf.train.Checkpoint(optimizer=optimizer, model=model)
 
