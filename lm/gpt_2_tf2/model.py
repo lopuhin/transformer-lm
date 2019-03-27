@@ -5,6 +5,7 @@ converted to TF 2.0 Keras API.
 import attr
 import numpy as np
 import tensorflow as tf
+from tensorflow.keras.initializers import RandomNormal, Constant
 
 
 @attr.s(auto_attribs=True, frozen=True)
@@ -20,18 +21,19 @@ class Model(tf.keras.Model):
     def __init__(self, hparams: HParams, name=None):
         super().__init__(name=name)
         self.hparams = hparams
-        self.wpe = tf.Variable(
-            tf.random.normal([hparams.n_ctx, hparams.n_embed], stddev=0.01))
-        self.wte = tf.Variable(
-            tf.random.normal([hparams.n_vocab, hparams.n_embed], stddev=0.02))
+        self.wpe = self.add_weight(
+            shape=[hparams.n_ctx, hparams.n_embed],
+            initializer=RandomNormal(stddev=0.01))
+        self.wte = self.add_weight(
+            shape=[hparams.n_vocab, hparams.n_embed],
+            initializer=RandomNormal(stddev=0.02))
         self.blocks = tf.keras.Sequential([
-            Block(hparams, name=f'h{i}') for i in range(hparams.n_layer)
-        ])
+            Block(hparams, name=f'h{i}') for i in range(hparams.n_layer)])
         self.ln_f = Norm()
 
     def call(self, x, past=None):
         results = {}
-        batch, sequence = shape_list(x)  # TODO simplify shape stuff?
+        batch, sequence = shape_list(x)
         past_length = 0 if past is None else tf.shape(input=past)[-2]
         h = (tf.gather(self.wte, x) +
              tf.gather(self.wpe, positions_for(x, past_length)))
@@ -85,8 +87,10 @@ class Norm(tf.keras.layers.Layer):
 
     def build(self, input_shape):
         n_state = input_shape[-1]
-        self.g = tf.Variable(tf.constant(1, shape=[n_state], dtype=tf.float32))
-        self.b = tf.Variable(tf.constant(0, shape=[n_state], dtype=tf.float32))
+        self.g = self.add_weight(
+            shape=[n_state], initializer=Constant(1), dtype=tf.float32)
+        self.b = self.add_weight(
+            shape=[n_state], initializer=Constant(0), dtype=tf.float32)
 
     def call(self, x):
         u = tf.reduce_mean(input_tensor=x, axis=self.axis, keepdims=True)
@@ -120,16 +124,19 @@ class Conv1D(tf.keras.layers.Layer):
         self.w_init_stdev = w_init_stdev
 
     def build(self, input_shape):
-        *self.start, self.nx = input_shape
-        self.w = tf.Variable(tf.random.normal([1, self.nx, self.n_state],
-                                              stddev=self.w_init_stdev))
-        self.b = tf.Variable(tf.constant(0, [self.n_state], dtype=tf.float32))
+        nx = input_shape[-1]
+        self.w = self.add_weight(
+            shape=[1, nx, self.n_state],
+            initializer=RandomNormal(stddev=self.w_init_stdev))
+        self.b = self.add_weight(
+            shape=[self.n_state], initializer=Constant(0), dtype=tf.float32)
 
     def call(self, x):
+        *start, nx = shape_list(x)
         return tf.reshape(
-            tf.matmul(tf.reshape(x, [-1, self.nx]),
-                      tf.reshape(self.w, [-1, self.nf])) + self.b,
-            self.start + [self.nf])
+            tf.matmul(tf.reshape(x, [-1, nx]),
+                      tf.reshape(self.w, [-1, self.n_state])) + self.b,
+            start + [self.n_state])
 
 
 class Attention(tf.keras.layers.Layer):
@@ -181,7 +188,7 @@ class Attention(tf.keras.layers.Layer):
     def multihead_attn(self, q, k, v):
         # q, k, v have shape [batch, heads, sequence, features]
         w = tf.matmul(q, k, transpose_b=True)
-        w = w * tf.math.rsqrt(tf.cast(v.shape[-1].value, w.dtype))
+        w = w * tf.math.rsqrt(tf.cast(v.shape[-1], w.dtype))
 
         w = self.mask_attn_weights(w)
         w = softmax(w)
@@ -192,6 +199,7 @@ class Attention(tf.keras.layers.Layer):
 def shape_list(x):
     """ Deal with dynamic shape in tensorflow cleanly.
     """
+    # TODO review usages, maybe something easier will do
     static = x.shape.as_list()
     dynamic = tf.shape(input=x)
     return [dynamic[i] if s is None else s for i, s in enumerate(static)]

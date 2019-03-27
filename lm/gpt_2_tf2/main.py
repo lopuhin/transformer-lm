@@ -91,7 +91,7 @@ def main(
         def train_step(context):
             context = tf.cast(context, tf.int32)
             with tf.GradientTape() as tape:
-                logits = model(context)
+                logits = model(context)['logits']
                 loss = loss_fn(context[:, 1:], logits[:, :-1])
             gradients = tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
@@ -99,7 +99,7 @@ def main(
 
         def valid_step(context):
             context = tf.cast(context, tf.int32)
-            logits = model(context)
+            logits = model(context)['logits']
             loss = loss_fn(context[:, 1:], logits[:, :-1])
             valid_loss(loss)
 
