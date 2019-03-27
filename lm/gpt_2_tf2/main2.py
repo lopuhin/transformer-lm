@@ -48,6 +48,9 @@ def main(
         sp_model_path,
         n_ctx=32,
         batch_size_per_replica=4,
+        n_embed=64,
+        n_head=4,
+        n_layer=4,
         epochs=2,
         ):
 

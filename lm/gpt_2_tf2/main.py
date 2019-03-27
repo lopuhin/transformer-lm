@@ -62,6 +62,11 @@ def main(
         dataset_path,
         sp_model_path,
         run_path=None,
+        batch_size=4,
+        n_ctx=64,
+        n_embd=64,
+        n_head=4,
+        n_layer=4,
         ):
 
     sp_model = spm.SentencePieceProcessor()
@@ -75,8 +80,6 @@ def main(
     print(f'Train dataset has {len(train_dataset):,} tokens')
 
     # TODO handle hyperparameters config
-    n_ctx = 32
-    batch_size = 4
 
     run_config = tf.estimator.RunConfig(
         save_summary_steps=10,
@@ -93,7 +96,8 @@ def main(
         input_fn=partial(_train_batch, train_dataset, n_ctx, batch_size),
         steps=100,
     )
-    valid_iter = _valid_iter(valid_dataset[:1000], batch_size=batch_size, n_ctx=n_ctx)
+    valid_iter = _valid_iter(
+        valid_dataset[:1000], batch_size=batch_size, n_ctx=n_ctx)
     eval_result = estimator.evaluate(lambda: next(valid_iter), steps=100)
     import IPython; IPython.embed()
 

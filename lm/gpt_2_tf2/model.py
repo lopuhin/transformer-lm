@@ -1,35 +1,18 @@
 """
-Based on https://github.com/openai/gpt-2/blob/master/src/model.py
-(just minor style adjustments made).
+Based on https://github.com/openai/gpt-2/blob/master/src/model.py,
+converted to TF 2.0
 """
+import attr
 import numpy as np
 import tensorflow as tf
-from tensorflow.contrib.training import HParams
 
 
-HPARAMS = {
-    'default': HParams(
-        n_vocab=0,
-        n_ctx=1024,
-        n_embd=768,
-        n_head=12,
-        n_layer=12,
-    ),
-    'small': HParams(
-        n_vocab=0,
-        n_ctx=256,
-        n_embd=256,
-        n_head=8,
-        n_layer=8,
-    ),
-    'tiny': HParams(
-        n_vocab=0,
-        n_ctx=64,
-        n_embd=64,
-        n_head=4,
-        n_layer=4,
-    ),
-}
+@attr.s(auto_attribs=True)
+class HParams:
+   n_ctx: int
+   n_embed: int
+   n_head: int
+   n_layer: int
 
 
 def shape_list(x):
@@ -49,7 +32,7 @@ def gelu(x):
     return 0.5*x*(1+tf.tanh(np.sqrt(2/np.pi)*(x+0.044715*tf.pow(x, 3))))
 
 
-def norm(x, scope, axis=-1, epsilon=1e-5):
+def norm(x, scope, *, axis=-1, epsilon=1e-5):
     """Normalize to mean = 0, std = 1, then do a diagonal affine transform."""
     with tf.compat.v1.variable_scope(scope):
         n_state = x.shape[-1].value
@@ -76,7 +59,7 @@ def merge_states(x):
     return tf.reshape(x, start + [a*b])
 
 
-def conv1d(x, scope, nf, w_init_stdev=0.02):
+def conv1d(x, scope, nf, *, w_init_stdev=0.02):
     with tf.compat.v1.variable_scope(scope):
         *start, nx = shape_list(x)
         w = tf.compat.v1.get_variable(
@@ -89,7 +72,7 @@ def conv1d(x, scope, nf, w_init_stdev=0.02):
         return c
 
 
-def attention_mask(nd, ns, dtype):
+def attention_mask(nd, ns, *, dtype):
     """1's in the lower triangle, counting from the lower right corner.
     Same as tf.matrix_band_part(tf.ones([nd, ns]), -1, ns-nd),
     but doesn't produce garbage on TPUs.
@@ -100,7 +83,7 @@ def attention_mask(nd, ns, dtype):
     return tf.cast(m, dtype)
 
 
-def attn(x, scope, n_state, past, hparams):
+def attn(x, scope, n_state, *, past, hparams: HParams):
     assert x.shape.ndims == 3  # Should be [batch, sequence, features]
     assert n_state % hparams.n_head == 0
     if past is not None:
@@ -156,7 +139,7 @@ def mlp(x, scope, n_state):
         return h2
 
 
-def block(x, scope, past, hparams):
+def block(x, scope, *, past, hparams: HParams):
     with tf.compat.v1.variable_scope(scope):
         nx = x.shape[-1].value
         a, present = attn(norm(x, 'ln_1'), 'attn', nx,
@@ -167,9 +150,9 @@ def block(x, scope, past, hparams):
         return x, present
 
 
-def past_shape(hparams, batch_size=None, sequence=None):
+def past_shape(*, hparams: HParams, batch_size=None, sequence=None):
     return [batch_size, hparams.n_layer, 2, hparams.n_head, sequence,
-            hparams.n_embd // hparams.n_head]
+            hparams.n_embed // hparams.n_head]
 
 
 def expand_tile(value, size):
@@ -185,16 +168,16 @@ def positions_for(tokens, past_length):
     return expand_tile(past_length + tf.range(nsteps), batch_size)
 
 
-def model(hparams, X, past=None, scope='model', reuse=False):
+def model(hparams: HParams, n_vocab: int, X, past=None, scope='model', reuse=False):
     with tf.compat.v1.variable_scope(scope, reuse=reuse):
         results = {}
         batch, sequence = shape_list(X)
 
         wpe = tf.compat.v1.get_variable(
-            'wpe', [hparams.n_ctx, hparams.n_embd],
+            'wpe', [hparams.n_ctx, hparams.n_embed],
             initializer=tf.compat.v1.initializers.random_normal(stddev=0.01), use_resource=False)
         wte = tf.compat.v1.get_variable(
-            'wte', [hparams.n_vocab, hparams.n_embd],
+            'wte', [n_vocab, hparams.n_embed],
             initializer=tf.compat.v1.initializers.random_normal(stddev=0.02), use_resource=False)
         past_length = 0 if past is None else tf.shape(input=past)[-2]
         h = tf.gather(wte, X) + tf.gather(wpe, positions_for(X, past_length))
@@ -211,8 +194,8 @@ def model(hparams, X, past=None, scope='model', reuse=False):
         h = norm(h, 'ln_f')
 
         # Language model loss.  Do tokens <n predict token n?
-        h_flat = tf.reshape(h, [batch*sequence, hparams.n_embd])
+        h_flat = tf.reshape(h, [batch*sequence, hparams.n_embed])
         logits = tf.matmul(h_flat, wte, transpose_b=True)
-        logits = tf.reshape(logits, [batch, sequence, hparams.n_vocab])
+        logits = tf.reshape(logits, [batch, sequence, n_vocab])
         results['logits'] = logits
         return results

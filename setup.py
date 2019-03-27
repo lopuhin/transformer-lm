@@ -4,6 +4,7 @@ setup(
     name='lm',
     packages=find_packages(),
     install_requires=[
+        'attrs',
         'fire',
         'numpy',
         'sentencepiece',
