@@ -3,6 +3,7 @@ Training loop, based on
 https://www.tensorflow.org/alpha/tutorials/distribute/training_loops
 """
 from pathlib import Path
+import shutil
 
 import fire
 import numpy as np
@@ -13,32 +14,16 @@ import tqdm
 from lm.fire_utils import only_allow_defined_args
 
 
-def create_model(vocab_size):
-    model = tf.keras.Sequential([
-        tf.keras.layers.Embedding(vocab_size, 64),
-        tf.keras.layers.Dense(vocab_size),
-    ])
-    print('model', model.summary())
-    return model
+class Model(tf.keras.Model):
+    def __init__(self, n_vocab: int):
+        super().__init__()
+        self.vocab_size = n_vocab
+        self.embedding = tf.keras.layers.Embedding(n_vocab, 64)
+        self.out = tf.keras.layers.Dense(n_vocab)
 
-
-# FIXME this does not train for some reason
-class Model(tf.Module):
-    def __init__(self, n_vocab, name=None):
-        super().__init__(name=name)
-        embedding_size = 64
-        self.emb = tf.Variable(
-            tf.random.uniform([n_vocab, embedding_size], minval=-0.1, maxval=0.1),
-            name='emb')
-        self.w = tf.Variable(
-            tf.random.normal([1, embedding_size, n_vocab], stddev=0.05),
-            name='w')
-        self.b = tf.Variable(tf.zeros([n_vocab]), name='b')
-
-    def __call__(self, x):
-        h = tf.nn.embedding_lookup(self.emb, x)
-        y = tf.nn.conv1d(h, self.w, 1, 'SAME') + self.b
-        return y
+    def call(self, context):
+        x = self.embedding(context)
+        return self.out(x)
 
 
 @only_allow_defined_args
@@ -52,7 +37,17 @@ def main(
         n_head=4,
         n_layer=4,
         epochs=2,
+        clean=False,  # clean run folder
         ):
+
+    run_path = Path(run_path)
+    run_path_mark = run_path / '.lm'
+    if clean and run_path.exists():
+        assert run_path_mark.exists()  # to avoid removing unrelated folder
+        shutil.rmtree(run_path)
+    run_path.mkdir(exist_ok=True, parents=True)
+    run_path_mark.touch()
+    checkpoint_prefix = run_path / 'checkpoints' / 'model'
 
     sp_model = spm.SentencePieceProcessor()
     sp_model.load(sp_model_path)
@@ -80,10 +75,6 @@ def main(
     valid_indices = range(0, len(valid_dataset) - n_ctx, n_ctx)
     valid_contexts = [valid_dataset[idx: idx + n_ctx] for idx in valid_indices]
 
-    # Create a checkpoint directory to store the checkpoints.
-    run_path = Path(run_path)
-    checkpoint_path = run_path / 'checkpoints'
-
     loss_fn = lambda labels, logits: \
         tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
             labels=labels, logits=logits))
@@ -96,8 +87,7 @@ def main(
         valid_iterator = strategy.experimental_make_numpy_iterator(
             valid_contexts, batch_size, shuffle=None)
 
-        # model = Model(n_vocab=len(sp_model))
-        model = create_model(len(sp_model))
+        model = Model(n_vocab=len(sp_model))
         optimizer = tf.optimizers.Adam()
         checkpoint = tf.train.Checkpoint(optimizer=optimizer, model=model)
 
@@ -136,7 +126,7 @@ def main(
             for _ in tqdm.trange(valid_steps_per_epoch, desc='validate'):
                 distributed_validate()
 
-            checkpoint.save(checkpoint_path)
+            checkpoint.save(checkpoint_prefix)
 
             print(f'epoch: {epoch + 1}, '
                   f'train_loss: {train_loss.result():.4f}, '
@@ -146,5 +136,5 @@ def main(
             valid_loss.reset_states()
 
 
-if __name__ == '__main__':
+def fire_main():
     fire.Fire(main)
