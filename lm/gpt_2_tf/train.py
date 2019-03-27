@@ -35,7 +35,7 @@ def train(
         sample_length=None,
         sample_num=1,
         sample_every=1000,
-        restore_from=None,  # checkpoint path, or from latest by default
+        restore_from=None,  # latest by default, or "path/model-STEP"
         save_every=1000,
         log_every=20,
         config='default',
@@ -68,8 +68,6 @@ def train(
     samples_path = run_path / 'samples'
     summaries_path = run_path / 'summaries'
     dataset_path = Path(dataset_path)
-    if checkpoints_path.exists() and restore_from is None:
-        restore_from = checkpoints_path
 
     hparams = model.HPARAMS[config]
     hparams.n_vocab = len(sp_model)
@@ -138,11 +136,11 @@ def train(
             keep_checkpoint_every_n_hours=4)
         sess.run(tf.global_variables_initializer())
 
-        if restore_from:
+        if restore_from or checkpoints_path.exists():
+            if restore_from is None:
+                restore_from = tf.train.latest_checkpoint(checkpoints_path)
             print(f'Restoring from {restore_from}')
-            ckpt = tf.train.latest_checkpoint(restore_from)
-            print(f'Loading checkpoint {ckpt}')
-            saver.restore(sess, ckpt)
+            saver.restore(sess, restore_from)
 
         print(f'Loading dataset from {dataset_path}')
         valid_dataset = np.load(dataset_path / 'valid.npy')
