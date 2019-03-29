@@ -71,14 +71,15 @@ def main(
 
     dataset_path = Path(dataset_path)
     print(f'Loading dataset from {dataset_path}')
-    valid_dataset = np.load(dataset_path / 'valid.npy')
-    train_dataset = np.load(dataset_path / 'train.npy')
+    valid_dataset = np.load(dataset_path / 'valid.npy')[:100000]
+    train_dataset = np.load(dataset_path / 'train.npy')[:1000000]
     print(f'Train dataset has {len(train_dataset):,} tokens')
     print(f'Validation dataset has {len(valid_dataset):,} tokens')
 
     strategy = tf.distribute.MirroredStrategy()
-    batch_size = batch_size_per_replica * strategy.num_replicas_in_sync
     print('Number of devices: {}'.format(strategy.num_replicas_in_sync))
+    batch_size = (accum_gradients * batch_size_per_replica *
+                  strategy.num_replicas_in_sync)
 
     step_tokens = n_ctx * batch_size
     train_steps_per_epoch = len(train_dataset) // step_tokens
@@ -111,7 +112,7 @@ def main(
         train_iterator = strategy.experimental_make_numpy_iterator(
             train_contexts, batch_size, shuffle=None)
         valid_iterator = strategy.experimental_make_numpy_iterator(
-            valid_contexts, batch_size, shuffle=None)
+            valid_contexts, batch_size // accum_gradients, shuffle=None)
 
         print('Creating model')
         model = Model(hparams)
@@ -120,14 +121,26 @@ def main(
 
         def train_step(context):
             context = tf.cast(context, tf.int32)
+            import time
+            t0 = time.time()
             gradients = None
-            for _ in range(accum_gradients):
-                with tf.GradientTape() as tape:
-                    logits = model(context)['logits']
-                    loss = loss_fn(context[:, 1:], logits[:, :-1])
+            with tf.GradientTape(persistent=True) as tape:
+                for input_context in tf.split(context, accum_gradients):
+                    t1 = time.time()
+                    print(t1 - t0)
+                    t0 = t1
+                    logits = model(input_context)['logits']
+                    loss = loss_fn(input_context[:, 1:], logits[:, :-1])
                     train_loss(loss)
-                g = tape.gradient(loss, model.trainable_variables)
-                gradients = g if gradients is None else (gradients + g)
+                    with tape.stop_recording():
+                        g = tape.gradient(loss, model.trainable_variables)
+                        if gradients is None:
+                            gradients = g
+                        else:
+                            # TODO consider updating IndexedSlices right away
+                            # add_n to handle IndexedSlices
+                            gradients = [tf.math.add_n(pair)
+                                         for pair in zip(gradients, g)]
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
 
         def valid_step(context):
