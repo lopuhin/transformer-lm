@@ -22,10 +22,10 @@ class Model(tf.keras.Model):
         super().__init__(name=name)
         self.hparams = hparams
         self.wpe = self.add_weight(
-            shape=[hparams.n_ctx, hparams.n_embed],
+            'wpe', [hparams.n_ctx, hparams.n_embed],
             initializer=RandomNormal(stddev=0.01))
         self.wte = self.add_weight(
-            shape=[hparams.n_vocab, hparams.n_embed],
+            'wte', [hparams.n_vocab, hparams.n_embed],
             initializer=RandomNormal(stddev=0.02))
         self.blocks = tf.keras.Sequential([
             Block(hparams, name=f'h{i}') for i in range(hparams.n_layer)])
@@ -88,9 +88,9 @@ class Norm(tf.keras.layers.Layer):
     def build(self, input_shape):
         n_state = input_shape[-1]
         self.g = self.add_weight(
-            shape=[n_state], initializer=Constant(1), dtype=tf.float32)
+            'g', [n_state], tf.float32, initializer=Constant(1))
         self.b = self.add_weight(
-            shape=[n_state], initializer=Constant(0), dtype=tf.float32)
+            'b', [n_state], dtype=tf.float32, initializer=Constant(0))
 
     def call(self, x):
         u = tf.reduce_mean(input_tensor=x, axis=self.axis, keepdims=True)
@@ -126,10 +126,10 @@ class Conv1D(tf.keras.layers.Layer):
     def build(self, input_shape):
         nx = input_shape[-1]
         self.w = self.add_weight(
-            shape=[1, nx, self.n_state],
+            'w', [1, nx, self.n_state],
             initializer=RandomNormal(stddev=self.w_init_stdev))
         self.b = self.add_weight(
-            shape=[self.n_state], initializer=Constant(0), dtype=tf.float32)
+            'b', [self.n_state], tf.float32, initializer=Constant(0))
 
     def call(self, x):
         *start, nx = shape_list(x)
