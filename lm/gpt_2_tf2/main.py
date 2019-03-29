@@ -71,8 +71,8 @@ def main(
 
     dataset_path = Path(dataset_path)
     print(f'Loading dataset from {dataset_path}')
-    valid_dataset = np.load(dataset_path / 'valid.npy')[:100000]
-    train_dataset = np.load(dataset_path / 'train.npy')[:1000000]
+    valid_dataset = np.load(dataset_path / 'valid.npy')
+    train_dataset = np.load(dataset_path / 'train.npy')
     print(f'Train dataset has {len(train_dataset):,} tokens')
     print(f'Validation dataset has {len(valid_dataset):,} tokens')
 
@@ -120,19 +120,14 @@ def main(
 
         def train_step(context):
             context = tf.cast(context, tf.int32)
-            import time
-            t0 = time.time()
-            loss = None
-            with tf.GradientTape() as tape:
-                for i in range(accum_gradients):
-                    t1 = time.time()
-                    print('accum_gradients', i, t1 - t0)
-                    t0 = t1
+            gradients = None
+            for _ in range(accum_gradients):
+                with tf.GradientTape() as tape:
                     logits = model(context)['logits']
-                    l = loss_fn(context[:, 1:], logits[:, :-1])
-                    train_loss(l)
-                    loss = l if loss is None else l + loss
-            gradients = tape.gradient(loss, model.trainable_variables)
+                    loss = loss_fn(context[:, 1:], logits[:, :-1])
+                    train_loss(loss)
+                g = tape.gradient(loss, model.trainable_variables)
+                gradients = g if gradients is None else (gradients + g)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
 
         def valid_step(context):
