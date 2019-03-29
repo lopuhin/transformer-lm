@@ -15,7 +15,8 @@ Installation
 
 Python 3.6+ is required. Working in a virtualenv is assumed below.
 `Install <https://www.tensorflow.org/install/pip>`_
-appropriate version of Tensorflow 1.13 first, and then::
+appropriate version of tensorflow-gpu==2.0.0a0 first
+(e.g. ``pip install tensorflow-gpu==2.0.0a0``), and then::
 
     pip install -r requirements.txt
     python setup.py develop

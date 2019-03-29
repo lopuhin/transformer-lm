@@ -27,6 +27,7 @@ def main(
         n_layer=4,
         epochs=2,
         clean=False,  # clean run folder
+        log_every=1,
         ):
 
     run_path = Path(run_path)
@@ -37,6 +38,7 @@ def main(
     run_path.mkdir(exist_ok=True, parents=True)
     run_path_mark.touch()
     checkpoint_prefix = run_path / 'checkpoints' / 'model'
+    summaries_path = run_path / 'summaries'
 
     sp_model = spm.SentencePieceProcessor()
     sp_model.load(sp_model_path)
@@ -75,8 +77,14 @@ def main(
     loss_fn = lambda labels, logits: \
         tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
             labels=labels, logits=logits))
+
+    step = 0
     train_loss = tf.keras.metrics.Mean(name='train_loss')
     valid_loss = tf.keras.metrics.Mean(name='valid_loss')
+    train_summary_writer = tf.summary.create_file_writer(
+        str(summaries_path / 'train'))
+    valid_summary_writer = tf.summary.create_file_writer(
+        str(summaries_path / 'valid'))
 
     with strategy.scope():
         train_iterator = strategy.experimental_make_numpy_iterator(
@@ -114,23 +122,25 @@ def main(
         for epoch in range(epochs):
 
             train_iterator.initialize()
-            train_pbar = tqdm.trange(train_steps_per_epoch, desc='train')
-            for _ in train_pbar:
+            for i in tqdm.trange(
+                    train_steps_per_epoch, desc='train', dynamic_ncols=True):
                 distributed_train()
-                train_pbar.set_postfix(loss=f'{train_loss.result():.4f}')
+                step += 1
+                if (i + 1) % log_every == 0:
+                    with train_summary_writer.as_default():
+                        tf.summary.scalar('loss', train_loss.result(),
+                                          step=step * step_tokens)
+                    train_loss.reset_states()
 
             valid_iterator.initialize()
-            for _ in tqdm.trange(valid_steps_per_epoch, desc='validate'):
-                distributed_validate()
-
-            checkpoint.save(checkpoint_prefix)
-
-            print(f'epoch: {epoch + 1}, '
-                  f'train_loss: {train_loss.result():.4f}, '
-                  f'valid_loss: {valid_loss.result():.4f}')
-
-            train_loss.reset_states()
             valid_loss.reset_states()
+            for _ in tqdm.trange(
+                    valid_steps_per_epoch, desc='validate', dynamic_ncols=True):
+                distributed_validate()
+            with valid_summary_writer.as_default():
+                tf.summary.scalar('loss', valid_loss.result(),
+                                  step=step * step_tokens)
+            checkpoint.save(checkpoint_prefix)
 
 
 def fire_main():
