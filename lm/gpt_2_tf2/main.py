@@ -23,6 +23,7 @@ def main(
         n_ctx=64,
         lr=1e-3,
         batch_size_per_replica=4,
+        accum_gradients=1,  # accumulate gradients N times
         n_embed=64,
         n_head=4,
         n_layer=4,
@@ -99,10 +100,16 @@ def main(
 
         def train_step(context):
             context = tf.cast(context, tf.int32)
-            with tf.GradientTape() as tape:
-                logits = model(context)['logits']
-                loss = loss_fn(context[:, 1:], logits[:, :-1])
-            gradients = tape.gradient(loss, model.trainable_variables)
+            gradients = None
+            for _ in range(accum_gradients):
+                with tf.GradientTape() as tape:
+                    logits = model(context)['logits']
+                    loss = loss_fn(context[:, 1:], logits[:, :-1])
+                g = tape.gradient(loss, model.trainable_variables)
+                if gradients is None:
+                    gradients = g
+                else:
+                    gradients += g
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
             train_loss(loss)
 
