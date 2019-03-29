@@ -20,7 +20,8 @@ def main(
         run_path,
         dataset_path,
         sp_model_path,
-        n_ctx=32,
+        n_ctx=64,
+        lr=1e-3,
         batch_size_per_replica=4,
         n_embed=64,
         n_head=4,
@@ -93,7 +94,7 @@ def main(
             valid_contexts, batch_size, shuffle=None)
 
         model = Model(hparams)
-        optimizer = tf.optimizers.Adam()
+        optimizer = tf.optimizers.Adam(lr)
         checkpoint = tf.train.Checkpoint(optimizer=optimizer, model=model)
 
         def train_step(context):
