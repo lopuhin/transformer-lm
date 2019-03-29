@@ -2,9 +2,12 @@
 Training loop, based on
 https://www.tensorflow.org/alpha/tutorials/distribute/training_loops
 """
+import json
 from pathlib import Path
 import shutil
+import sys
 
+import attr
 import fire
 import numpy as np
 import sentencepiece as spm
@@ -20,14 +23,14 @@ def main(
         run_path,
         dataset_path,
         sp_model_path,
-        n_ctx=64,
-        lr=1e-3,
-        batch_size_per_replica=4,
-        accum_gradients=1,  # accumulate gradients N times
-        n_embed=64,
-        n_head=4,
-        n_layer=4,
-        epochs=2,
+        epochs=10,
+        lr=2.5e-4,
+        batch_size_per_replica=2,
+        accum_gradients=32,  # accumulate gradients N times
+        n_ctx=1024,
+        n_embed=768,
+        n_head=12,
+        n_layer=12,
         clean=False,  # clean run folder
         log_every=1,
         validate_every=None,
@@ -54,6 +57,17 @@ def main(
         n_head=n_head,
         n_layer=n_layer,
     )
+    params = dict(
+        hparams=attr.asdict(hparams),
+        argv=' '.join(sys.argv),
+        epochs=epochs,
+        lr=lr,
+        batch_size_per_replica=batch_size_per_replica,
+        accum_gradients=accum_gradients,
+    )
+    params_s = json.dumps(params, indent=4, sort_keys=True, ensure_ascii=False)
+    print(params_s)
+    (run_path / 'params.json').write_text(params_s, encoding='utf8')
 
     dataset_path = Path(dataset_path)
     print(f'Loading dataset from {dataset_path}')
@@ -70,8 +84,8 @@ def main(
     train_steps_per_epoch = len(train_dataset) // step_tokens
     valid_steps_per_epoch = len(valid_dataset) // step_tokens
 
-    # TODO check that memory usage is ok
     # TODO: re-create each epoch (or change experimental_make_numpy_iterator)
+    print('Creating dataset slices')
     train_indices = [np.random.randint(0, len(train_dataset) - n_ctx)
                      for _ in range(len(train_dataset) // n_ctx)]
     train_contexts = [train_dataset[idx: idx + n_ctx] for idx in train_indices]
@@ -92,11 +106,14 @@ def main(
         str(summaries_path / 'valid'))
 
     with strategy.scope():
+        print('Creating dataset iterators')
+        # FIXME this takes forever
         train_iterator = strategy.experimental_make_numpy_iterator(
             train_contexts, batch_size, shuffle=None)
         valid_iterator = strategy.experimental_make_numpy_iterator(
             valid_contexts, batch_size, shuffle=None)
 
+        print('Creating model')
         model = Model(hparams)
         optimizer = tf.optimizers.Adam(lr)
         checkpoint = tf.train.Checkpoint(optimizer=optimizer, model=model)
