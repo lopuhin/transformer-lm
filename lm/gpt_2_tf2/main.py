@@ -30,6 +30,8 @@ def main(
         epochs=2,
         clean=False,  # clean run folder
         log_every=1,
+        validate_every=None,
+        save_every=None,
         ):
 
     run_path = Path(run_path)
@@ -76,9 +78,10 @@ def main(
     valid_indices = range(0, len(valid_dataset) - n_ctx, n_ctx)
     valid_contexts = [valid_dataset[idx: idx + n_ctx] for idx in valid_indices]
 
+    # Loss is scaled by the number of replicas, as gradients are summed
     loss_fn = lambda labels, logits: \
         tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
-            labels=labels, logits=logits))
+            labels=labels, logits=logits)) / strategy.num_replicas_in_sync
 
     step = 0
     train_loss = tf.keras.metrics.Mean(name='train_loss')
@@ -127,27 +130,34 @@ def main(
         def distributed_validate():
             return strategy.experimental_run(valid_step, valid_iterator)
 
-        for epoch in range(epochs):
-
-            train_iterator.initialize()
-            for i in tqdm.trange(
-                    train_steps_per_epoch, desc='train', dynamic_ncols=True):
-                distributed_train()
-                step += 1
-                if (i + 1) % log_every == 0:
-                    with train_summary_writer.as_default():
-                        tf.summary.scalar('loss', train_loss.result(),
-                                          step=step * step_tokens)
-                    train_loss.reset_states()
-
+        def validate():
             valid_iterator.initialize()
             valid_loss.reset_states()
-            for _ in tqdm.trange(
-                    valid_steps_per_epoch, desc='validate', dynamic_ncols=True):
+            for _ in tqdm.trange(valid_steps_per_epoch, desc='validate',
+                                 leave=False, dynamic_ncols=True):
                 distributed_validate()
             with valid_summary_writer.as_default():
                 tf.summary.scalar('loss', valid_loss.result(),
                                   step=step * step_tokens)
+
+        for epoch in tqdm.trange(1, epochs + 1, desc='epochs'):
+
+            train_iterator.initialize()
+            for _ in tqdm.trange(train_steps_per_epoch, desc=f'epoch {epoch}',
+                                 dynamic_ncols=True):
+                distributed_train()
+                step += 1
+                if step % log_every == 0:
+                    with train_summary_writer.as_default():
+                        tf.summary.scalar('loss', train_loss.result(),
+                                          step=step * step_tokens)
+                    train_loss.reset_states()
+                if validate_every and step % validate_every == 0:
+                    validate()
+                if save_every and step % save_every == 0:
+                    checkpoint.save(checkpoint_prefix)
+
+            validate()
             checkpoint.save(checkpoint_prefix)
 
 
