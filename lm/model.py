@@ -26,13 +26,12 @@ class Model(nn.Module):
         results = {}
         past_length = 0 if past is None else past.shape[-2]
         batch_size, n_steps, *_ = x.shape
-        position = position_for(batch_size, n_steps, past_length)
+        position = position_for(batch_size, n_steps, past_length, x.device)
         h = self.wte(x) + self.wpe(position)
         assert h.shape == (batch_size, self.hparams.n_ctx, self.hparams.n_embed)
         return h
 
 
-def position_for(batch_size, n_steps, past_length):
-    # TODO device?
-    return (torch.arange(past_length, n_steps + past_length)
+def position_for(batch_size, n_steps, past_length, device=None):
+    return (torch.arange(past_length, n_steps + past_length, device=device)
             .unsqueeze(0).repeat(batch_size, 1))
