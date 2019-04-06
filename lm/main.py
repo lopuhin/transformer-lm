@@ -10,6 +10,7 @@ import torch.cuda
 from torch import nn, optim
 import tqdm
 import sentencepiece as spm
+import json_log_plots
 
 from .fire_utils import only_allow_defined_args
 from .model import Model, HParams
@@ -30,7 +31,6 @@ def main(
         n_layer=12,
         clean=False,  # clean run folder
         log_every=1,
-        validate_every=None,
         save_every=None,
         ):
     run_path = Path(run_path)
@@ -88,6 +88,12 @@ def main(
         optimizer.step()
         return float(loss.item())
 
+    def save():
+        torch.save({
+            'state_dict': model.state_dict(),
+            'step': step,
+        }, run_path / 'model.pt')
+
     step = 1
     step_tokens = n_ctx * batch_size * accum_gradients
     epoch_size = len(train_dataset) // step_tokens
@@ -96,11 +102,12 @@ def main(
             epoch_pbar = tqdm.trange(epoch_size, desc=f'epoch {epoch}')
             for _ in epoch_pbar:
                 loss_value = train_step()
+                json_log_plots.write_event(
+                    run_path, step=step * step_tokens, loss=loss_value)
                 step += 1
                 epoch_pbar.set_postfix({
                     'step': step,
-                    'loss': f'{loss_value:.2f}',
-                })
+                    'loss': f'{loss_value:.2f}'})
 
     except KeyboardInterrupt:
         print('Interrupted, saving')

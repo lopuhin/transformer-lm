@@ -5,6 +5,7 @@ setup(
     packages=find_packages(),
     install_requires=[
         'attrs',
+        'json-log-plots',
         'fire',
         'numpy',
         'sentencepiece',
