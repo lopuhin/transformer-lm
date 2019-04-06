@@ -79,14 +79,16 @@ def main(
         context = _gen_batch(
             train_dataset, n_ctx=n_ctx, batch_size=batch_size * accum_gradients)
         context = torch.LongTensor(context, device=device)
-        assert accum_gradients == 1  # TODO
         optimizer.zero_grad()
-        logits = model(context)['logits']
-        loss = loss_fn(input=logits[:, :-1].reshape([-1, logits.shape[-1]]),
-                       target=context[:, 1:].reshape(-1))
-        loss.backward()
+        loss_value = 0.
+        for ctx in torch.split(context, batch_size):
+            logits = model(ctx)['logits']
+            loss = loss_fn(input=logits[:, :-1].reshape([-1, logits.shape[-1]]),
+                           target=ctx[:, 1:].reshape(-1))
+            loss.backward()
+            loss_value += float(loss.item()) / accum_gradients
         optimizer.step()
-        return float(loss.item())
+        return loss_value
 
     def save():
         torch.save({
@@ -101,13 +103,11 @@ def main(
         for epoch in tqdm.trange(1, epochs + 1, desc='epoch'):
             epoch_pbar = tqdm.trange(epoch_size, desc=f'epoch {epoch}')
             for _ in epoch_pbar:
-                loss_value = train_step()
+                loss = train_step()
                 json_log_plots.write_event(
-                    run_path, step=step * step_tokens, loss=loss_value)
+                    run_path, step=step * step_tokens, loss=loss)
                 step += 1
-                epoch_pbar.set_postfix({
-                    'step': step,
-                    'loss': f'{loss_value:.2f}'})
+                epoch_pbar.set_postfix({'step': step, 'loss': f'{loss:.2f}'})
 
     except KeyboardInterrupt:
         print('Interrupted, saving')
