@@ -100,8 +100,10 @@ def main(
     step_tokens = n_ctx * batch_size * accum_gradients
     epoch_size = len(train_dataset) // step_tokens
     try:
-        for epoch in tqdm.trange(1, epochs + 1, desc='epoch'):
-            epoch_pbar = tqdm.trange(epoch_size, desc=f'epoch {epoch}')
+        for epoch in tqdm.trange(1, epochs + 1, desc='epoch',
+                                 dynamic_ncols=True):
+            epoch_pbar = tqdm.trange(epoch_size, desc=f'epoch {epoch}',
+                                     dynamic_ncols=True)
             for _ in epoch_pbar:
                 loss = train_step()
                 json_log_plots.write_event(
