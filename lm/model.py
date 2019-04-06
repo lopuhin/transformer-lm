@@ -53,9 +53,17 @@ class Model(nn.Module):
 class Block(nn.Module):
     def __init__(self, hparams: HParams):
         super().__init__()
+        self.ln_1 = Norm(hparams.n_embed)
+        self.ln_2 = Norm(hparams.n_embed)
+        self.mlp = MLP(hparams.n_embed, hparams.n_embed * 4)
+        self.attn = Attention(hparams)
 
     def forward(self, x, past):
-        pass
+        a, present = self.attn(self.ln_1(x), past=past)
+        x = x + a
+        m = self.mlp(self.ln_2(x))
+        x = x + m
+        return x, present
 
 
 class Norm(nn.Module):

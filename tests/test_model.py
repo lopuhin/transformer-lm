@@ -1,7 +1,7 @@
 import torch
 import torch.cuda
 
-from lm.model import HParams, Model, position_for, Norm, MLP, Attention
+from lm.model import HParams, Model, position_for, Norm, MLP, Attention, Block
 from .utils import parametrize_device
 
 
@@ -54,10 +54,20 @@ hparams = HParams(
 
 def test_attention():
     attention = Attention(hparams)
-    x = torch.randn(2, hparams.n_ctx, hparams.n_embed)
+    x = torch.randn(3, hparams.n_ctx, hparams.n_embed)
     a, present = attention(x, past=None)  # TODO test past
-    print('a', a.shape)
-    print('present', present.shape)
+    assert a.shape == (3, hparams.n_ctx, hparams.n_embed)
+    assert present.shape == (
+        3, 2, hparams.n_head, hparams.n_ctx, hparams.n_embed)
+
+
+def test_block():
+    block = Block(hparams)
+    x = torch.randn(2, hparams.n_ctx, hparams.n_embed)
+    a, present = block(x, past=None)  # TODO test past
+    assert a.shape == (3, hparams.n_ctx, hparams.n_embed)
+    assert present.shape == (
+        3, 2, hparams.n_head, hparams.n_ctx, hparams.n_embed)
 
 
 @parametrize_device('device')
