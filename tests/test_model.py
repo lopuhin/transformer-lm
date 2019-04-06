@@ -58,16 +58,16 @@ def test_attention():
     a, present = attention(x, past=None)  # TODO test past
     assert a.shape == (3, hparams.n_ctx, hparams.n_embed)
     assert present.shape == (
-        3, 2, hparams.n_head, hparams.n_ctx, hparams.n_embed)
+        3, 2, hparams.n_head, hparams.n_ctx, hparams.n_embed // hparams.n_head)
 
 
 def test_block():
     block = Block(hparams)
-    x = torch.randn(2, hparams.n_ctx, hparams.n_embed)
+    x = torch.randn(3, hparams.n_ctx, hparams.n_embed)
     a, present = block(x, past=None)  # TODO test past
     assert a.shape == (3, hparams.n_ctx, hparams.n_embed)
     assert present.shape == (
-        3, 2, hparams.n_head, hparams.n_ctx, hparams.n_embed)
+        3, 2, hparams.n_head, hparams.n_ctx, hparams.n_embed // hparams.n_head)
 
 
 @parametrize_device('device')
@@ -78,5 +78,8 @@ def test_model(device):
     x = x.to(device)
     model.to(device)
     result = model(x)
-    print('result', result.shape)
-    assert result.shape == (2, hparams.n_ctx, hparams.n_embed)
+    presents = result['presents']
+    assert result['logits'].shape == (2, hparams.n_ctx, hparams.n_vocab)
+    assert result['presents'].shape == (
+        2, hparams.n_layer, 2, hparams.n_head, hparams.n_ctx,
+        hparams.n_embed // hparams.n_head)

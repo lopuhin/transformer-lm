@@ -33,17 +33,20 @@ class Model(nn.Module):
     def forward(self, x, past=None):
         # Embedding
         past_length = 0 if past is None else past.shape[-2]
-        batch_size, n_steps = x.shape
-        position = position_for(batch_size, n_steps, past_length, x.device)
+        batch_size, n_ctx = x.shape
+        position = position_for(batch_size, n_ctx, past_length, x.device)
         h = self.wte(x) + self.wpe(position)
         assert h.shape == (batch_size, self.hparams.n_ctx, self.hparams.n_embed)
-        return h  # TODO
         # Transformer
         presents = []
         for i, block in enumerate(self.blocks):
             h, present = block(h, past=past[:, i] if past is not None else None)
             presents.append(present)
-
+        h = self.ln_f(h)
+        # Output logits
+        h_flat = h.reshape([batch_size * n_ctx, self.hparams.n_embed])
+        logits = torch.matmul(h_flat, self.wte.weight.t())
+        logits = logits.reshape([batch_size, n_ctx, self.hparams.n_vocab])
         return {
             'presents': torch.stack(tuple(presents), dim=1),
             'logits': logits,
