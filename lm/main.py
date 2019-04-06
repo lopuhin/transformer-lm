@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import statistics
 import shutil
 import sys
 
@@ -31,7 +32,7 @@ def main(
         n_layer=12,
         clean=False,  # clean run folder
         log_every=1,
-        save_every=None,
+        save_every=1,
         ):
     run_path = Path(run_path)
     run_path_mark = run_path / '.lm'
@@ -99,17 +100,27 @@ def main(
     step = 1
     step_tokens = n_ctx * batch_size * accum_gradients
     epoch_size = len(train_dataset) // step_tokens
+    loss_meter = AverageMeter()
     try:
         for epoch in tqdm.trange(1, epochs + 1, desc='epoch',
                                  dynamic_ncols=True):
             epoch_pbar = tqdm.trange(epoch_size, desc=f'epoch {epoch}',
                                      dynamic_ncols=True)
             for _ in epoch_pbar:
-                loss = train_step()
-                json_log_plots.write_event(
-                    run_path, step=step * step_tokens, loss=loss)
+                if step % save_every == 0:
+                    save()
+                lv = train_step()
+                loss_meter.update(lv)
                 step += 1
-                epoch_pbar.set_postfix({'step': step, 'loss': f'{loss:.2f}'})
+                epoch_pbar.set_postfix({
+                    'step': step,
+                    'loss': f'{loss_meter.mean():.2f}'})
+                if step % log_every == 0:
+                    json_log_plots.write_event(
+                        run_path,
+                        step=step * step_tokens,
+                        loss=loss_meter.mean())
+                    loss_meter.reset()
 
     except KeyboardInterrupt:
         print('Interrupted, saving')
@@ -121,6 +132,20 @@ def _gen_batch(dataset: np.ndarray, n_ctx: int, batch_size: int):
     indices = [np.random.randint(0, len(dataset) - n_ctx)
                for _ in range(batch_size)]
     return [dataset[idx: idx + n_ctx] for idx in indices]
+
+
+class AverageMeter:
+    def __init__(self):
+        self.values = []
+
+    def update(self, value):
+        self.values.append(value)
+
+    def mean(self):
+        return statistics.mean(self.values)
+
+    def reset(self):
+        self.values.clear()
 
 
 def fire_main():
