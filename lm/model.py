@@ -183,7 +183,7 @@ class Attention(nn.Module):
 
 class Conv1D(nn.Linear):
     def reset_parameters(self):
-        nn.init.normal_(self.weight, 0.02)
+        nn.init.normal_(self.weight, std=0.02)
         nn.init.zeros_(self.bias)
 
 
