@@ -79,10 +79,11 @@ def main(
     def train_step():
         context = _gen_batch(
             train_dataset, n_ctx=n_ctx, batch_size=batch_size * accum_gradients)
-        context = torch.LongTensor(context, device=device)
+        context = torch.LongTensor(context)
         optimizer.zero_grad()
         loss_value = 0.
         for ctx in torch.split(context, batch_size):
+            ctx = ctx.to(device=device)
             logits = model(ctx)['logits']
             loss = loss_fn(input=logits[:, :-1].reshape([-1, logits.shape[-1]]),
                            target=ctx[:, 1:].reshape(-1))
