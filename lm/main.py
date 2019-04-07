@@ -76,22 +76,21 @@ def main(
     model = Model(hparams).to(device=device)
     loss_fn = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
+    loss_meter = AverageMeter()
 
     def train_step():
         context = _gen_batch(
             train_dataset, n_ctx=n_ctx, batch_size=batch_size * accum_gradients)
         context = torch.LongTensor(context)
         optimizer.zero_grad()
-        loss_value = 0.
         for ctx in torch.split(context, batch_size):
             ctx = ctx.to(device=device)
             logits = model(ctx)['logits']
             loss = loss_fn(input=logits[:, :-1].reshape([-1, logits.shape[-1]]),
                            target=ctx[:, 1:].reshape(-1))
             loss.backward()
-            loss_value += float(loss.item()) / accum_gradients
+            loss_meter.update(float(loss.item()))
         optimizer.step()
-        return loss_value
 
     def save():
         torch.save({
@@ -102,7 +101,6 @@ def main(
     step = 1
     step_tokens = n_ctx * batch_size * accum_gradients
     epoch_size = len(train_dataset) // step_tokens
-    loss_meter = AverageMeter()
     try:
         for epoch in tqdm.trange(1, epochs + 1, desc='epoch',
                                  dynamic_ncols=True):
@@ -115,8 +113,7 @@ def main(
                     print(f'max_steps {max_steps} reached, saving and exiting')
                     save()
                     return
-                lv = train_step()
-                loss_meter.update(lv)
+                train_step()
                 step += 1
                 epoch_pbar.set_postfix({
                     'step': step,
