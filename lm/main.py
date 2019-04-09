@@ -9,6 +9,7 @@ import attr
 import fire
 import numpy as np
 import torch.cuda
+import torch.backends.cudnn as cudnn
 from torch import nn, optim
 import tqdm
 import sentencepiece as spm
@@ -87,6 +88,7 @@ def main(
     loss_fn = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
     loss_meter = AverageMeter()
+    cudnn.benchmark = True
 
     if device_id is not None:
         print('Initializing process group')
