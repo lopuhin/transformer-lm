@@ -44,7 +44,7 @@ def sp_train():
                 for path in tqdm.tqdm(
                         paths, desc='building sentencepiece input'):
                     with path.open('rt', encoding='utf8') as f:
-                        for line in f.readlines():
+                        for line in f:
                             if line.strip():
                                 sp_text_file.write(line)
         except Exception:
@@ -95,7 +95,7 @@ def sp_encode():
             for path in tqdm.tqdm(split_paths, desc=str(split_root)):
                 encoded = []
                 with path.open('rt', encoding='utf8') as f:
-                    for line in f.readlines():
+                    for line in f:
                         encoded.extend(sp_model.EncodeAsIds(line))
                         encoded.append(eol)
                     encoded.append(eot)
