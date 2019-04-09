@@ -92,14 +92,22 @@ def sp_encode():
             if not split_paths:
                 parser.error(f'Corpus {split} split {split_root} looks empty, '
                              f'no text files found')
+
+            def append_and_clear(x):
+                encoded_splits[split].append(np.array(x, dtype=dtype))
+                x.clear()
+
             for path in tqdm.tqdm(split_paths, desc=str(split_root)):
                 encoded = []
                 with path.open('rt', encoding='utf8') as f:
                     for line in f:
                         encoded.extend(sp_model.EncodeAsIds(line))
                         encoded.append(eol)
+                        if len(encoded) > 100000:
+                            # save memory by using a more compact representation
+                            append_and_clear(encoded)
                     encoded.append(eot)
-                encoded_splits[split].append(np.array(encoded, dtype=dtype))
+                append_and_clear(encoded)
 
     output_root = Path(args.output)
     output_root.mkdir(exist_ok=True, parents=True)
@@ -109,4 +117,3 @@ def sp_encode():
         encoded = np.concatenate(encoded_splits[split])
         assert encoded.dtype == dtype
         np.save(split_path, encoded)
-
