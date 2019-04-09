@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import statistics
 import shutil
@@ -34,14 +35,19 @@ def main(
         log_every=1,
         save_every=1000,
         max_steps=None,
+        device_id=None,
         ):
+    # TODO spawn automatically
+    is_main = device_id in {0, None}
+
     run_path = Path(run_path)
-    run_path_mark = run_path / '.lm'
-    if clean and run_path.exists():
+    if is_main:
+        run_path_mark = run_path / '.lm'
+        if clean and run_path.exists():
             assert run_path_mark.exists()  # to avoid removing unrelated folder
             shutil.rmtree(run_path)
-    run_path.mkdir(exist_ok=True, parents=True)
-    run_path_mark.touch()
+        run_path.mkdir(exist_ok=True, parents=True)
+        run_path_mark.touch()
 
     sp_model = spm.SentencePieceProcessor()
     sp_model.load(sp_model_path)
@@ -63,7 +69,8 @@ def main(
     )
     params_s = json.dumps(params, indent=4, sort_keys=True, ensure_ascii=False)
     print(params_s)
-    (run_path / 'params.json').write_text(params_s, encoding='utf8')
+    if is_main:
+        (run_path / 'params.json').write_text(params_s, encoding='utf8')
 
     dataset_path = Path(dataset_path)
     print(f'Loading dataset from {dataset_path}')
@@ -72,11 +79,21 @@ def main(
     print(f'Train dataset has {len(train_dataset):,} tokens')
     print(f'Validation dataset has {len(valid_dataset):,} tokens')
 
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    model = Model(hparams).to(device=device)
+    if torch.cuda.is_available():
+        device = torch.device('cuda', index=device_id)
+    else:
+        device = torch.device('cpu')
+    model = Model(hparams).to(device)
     loss_fn = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
     loss_meter = AverageMeter()
+
+    if device_id is not None:
+        print('Initializing process group')
+        torch.distributed.init_process_group(backend='nccl', rank=device_id)
+        model = nn.parallel.DistributedDataParallel(
+            model, device_ids=[device_id], output_device=device_id)
+        print('done')
 
     def train_step():
         context = _gen_batch(
@@ -93,13 +110,15 @@ def main(
         optimizer.step()
 
     def save():
-        torch.save({
-            'state_dict': model.state_dict(),
-            'step': step,
-        }, run_path / 'model.pt')
+        if is_main:
+            torch.save({
+                'state_dict': model.state_dict(),
+                'step': step,
+            }, run_path / 'model.pt')
 
     step = 1
-    step_tokens = n_ctx * batch_size * accum_gradients
+    world_size = int(os.environ.get('WORLD_SIZE', 1))
+    step_tokens = n_ctx * batch_size * accum_gradients * world_size
     epoch_size = len(train_dataset) // step_tokens
     try:
         for epoch in tqdm.trange(1, epochs + 1, desc='epoch',
@@ -118,7 +137,7 @@ def main(
                 epoch_pbar.set_postfix({
                     'step': step,
                     'loss': f'{loss_meter.mean():.2f}'})
-                if step % log_every == 0:
+                if step % log_every == 0 and is_main:
                     json_log_plots.write_event(
                         run_path,
                         step=step * step_tokens,
