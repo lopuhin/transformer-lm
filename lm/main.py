@@ -37,6 +37,8 @@ def main(
         log_every=1,
         save_every=1000,
         max_steps=None,
+        master_port='40390',
+        master_addr='127.0.0.1',
         # These are set automatically when multiple GPUs are available
         device_id=None,
         n_devices=None,
@@ -50,6 +52,7 @@ def main(
             return
 
     is_main = device_id in {0, None}
+    world_size = max(1, n_devices)
 
     run_path = Path(run_path)
     if is_main:
@@ -102,8 +105,8 @@ def main(
 
     if device_id is not None:
         print(f'device {device} initializing process group')
-        os.environ['MASTER_PORT'] = '40390'
-        os.environ['MASTER_ADDR'] = '127.0.0.1'
+        os.environ['MASTER_PORT'] = master_port
+        os.environ['MASTER_ADDR'] = master_addr
         torch.distributed.init_process_group(
             backend='nccl', rank=device_id, world_size=n_devices)
         model = nn.parallel.DistributedDataParallel(
@@ -125,14 +128,17 @@ def main(
         optimizer.step()
 
     def save():
-        if is_main:
-            torch.save({
-                'state_dict': model.state_dict(),
-                'step': step,
-            }, run_path / 'model.pt')
+        if not is_main:
+            return
+        model_path = run_path / 'model.pt'
+        optim_path = run_path / 'optim.pt'
+        for path in [model_path, optim_path]:
+            if path.exists():
+                shutil.copy(path, f'{path.stem}-prev{path.suffix}')
+        torch.save({'state_dict': model.state_dict(), 'step': step}, model_path)
+        torch.save(optimizer.state_dict(), optim_path)
 
     step = 1
-    world_size = int(os.environ.get('WORLD_SIZE', 1))
     step_tokens = n_ctx * batch_size * accum_gradients * world_size
     epoch_size = len(train_dataset) // step_tokens
     try:
