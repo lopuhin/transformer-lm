@@ -36,7 +36,7 @@ def main(
         clean=False,  # clean run folder
         log_every=1,
         save_every=1000,
-        max_steps=None,
+        max_tokens=None,
         master_port='40390',
         master_addr='127.0.0.1',
         # These are set automatically when multiple GPUs are available
@@ -156,8 +156,8 @@ def main(
             for _ in epoch_pbar:
                 if step % save_every == 0:
                     save()
-                if max_steps and step >= max_steps:
-                    print(f'max_steps {max_steps} reached, saving and exiting')
+                if max_tokens and step * step_tokens >= max_tokens:
+                    print(f'max_tokens {max_tokens} reached, saving and exiting')
                     save()
                     return
                 train_step()
