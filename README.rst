@@ -66,11 +66,24 @@ Example command::
 
 ``run-root`` would contain model checkpoints and json-lines logs,
 which can be plotted in a jupyter notebook with
-``json_log_plots.plot("run-root")``.
+``json_log_plots.plot("run-root")``, with number of tokens seen on the X axis.
+
 Default hyperparameters correspond to released "small" GPT-2 model.
 
 When multiple GPUs are available, they would be used for training with the
 help of ``torch.distributed``.
+
+Notes on training parameters:
+
+- ``--batch-size`` is per-GPU, so you don't need to re-tune it when changing
+  number of GPUs, just use max that fits into memory.
+- ``--g-accum-gradients`` is the global number of gradient accumulations,
+  it must be divisible by the number of GPUs. Effective global batch size is
+  always ``batch_size * g_accum_gradients``.
+- ``--lr`` does not need to be changed when changing
+  ``--batch-size`` or ``--g-accum-gradients`` or number of GPUs
+  or ``--n-ctx``: loss is already scaled appropriately.
+
 
 License & credits
 -----------------

@@ -27,8 +27,8 @@ def main(
         sp_model_path,
         epochs=10,
         lr=2.5e-4,
-        batch_size=2,
-        accum_gradients=32,  # accumulate gradients N times
+        batch_size=2,  # per GPU
+        g_accum_gradients=32,  # accumulate gradients N times (globally)
         n_ctx=1024,
         n_embed=768,
         n_head=12,
@@ -53,6 +53,8 @@ def main(
 
     is_main = device_id in {0, None}
     world_size = max(1, n_devices)
+    assert g_accum_gradients % world_size == 0
+    accum_gradients = g_accum_gradients // world_size
 
     run_path = Path(run_path)
     if is_main:
@@ -108,12 +110,19 @@ def main(
         os.environ['MASTER_PORT'] = master_port
         os.environ['MASTER_ADDR'] = master_addr
         torch.distributed.init_process_group(
-            backend='nccl', rank=device_id, world_size=n_devices)
+            backend='nccl', rank=device_id, world_size=world_size)
         model = nn.parallel.DistributedDataParallel(
             model, device_ids=[device_id], output_device=device_id)
         print(f'process group for {device} initialized')
 
+    step = 1
+    step_tokens = n_ctx * batch_size * g_accum_gradients  # all GPUs
+    epoch_size = len(train_dataset) // step_tokens  # all GPUs
+    loss_scale = n_ctx * batch_size * accum_gradients / (512 * 4 * 32)
+
     def train_step():
+        """ Train step on one GPU.
+        """
         context = _gen_batch(
             train_dataset, n_ctx=n_ctx, batch_size=batch_size * accum_gradients)
         context = torch.LongTensor(context)
@@ -123,7 +132,7 @@ def main(
             logits = model(ctx)['logits']
             loss = loss_fn(input=logits[:, :-1].reshape([-1, logits.shape[-1]]),
                            target=ctx[:, 1:].reshape(-1))
-            loss.backward()
+            (loss * loss_scale).backward()
             loss_meter.update(float(loss.item()))
         optimizer.step()
 
@@ -138,14 +147,12 @@ def main(
         torch.save({'state_dict': model.state_dict(), 'step': step}, model_path)
         torch.save(optimizer.state_dict(), optim_path)
 
-    step = 1
-    step_tokens = n_ctx * batch_size * accum_gradients * world_size
-    epoch_size = len(train_dataset) // step_tokens
-    try:
+    def train():
+        nonlocal step
         for epoch in tqdm.trange(1, epochs + 1, desc='epoch',
-                                 dynamic_ncols=True):
+                                 dynamic_ncols=True, disable=not is_main):
             epoch_pbar = tqdm.trange(epoch_size, desc=f'epoch {epoch}',
-                                     dynamic_ncols=True)
+                                     dynamic_ncols=True, disable=not is_main)
             for _ in epoch_pbar:
                 if step % save_every == 0:
                     save()
@@ -165,6 +172,8 @@ def main(
                         loss=loss_meter.mean())
                     loss_meter.reset()
 
+    try:
+        train()
     except KeyboardInterrupt:
         if is_main:
             print('Interrupted, saving')
