@@ -12,6 +12,7 @@ This repo contains a PyTorch implementation of GPT-2, which support multi-GPU
 training.
 It also contains a TensorFlow implementation in ``lm/gpt_2_tf``,
 but it is not developed any more. They share the same data preparation scripts.
+TF training command is ``gpt-2-tf-train`` and needs TensorFlow 1.13.
 Documentation below is for PyTorch version.
 
 .. contents::
@@ -21,8 +22,7 @@ Installation
 
 Python 3.6+ is required. Working in a virtualenv is assumed below.
 `Install <https://pytorch.org/get-started/locally/>`__
-appropriate version of pytorch 1.0.1 first
-(e.g. ``pip install torch``), and then::
+appropriate version of pytorch first (e.g. ``pip install torch``), and then::
 
     pip install -r requirements.txt
     python setup.py develop
