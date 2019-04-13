@@ -1,12 +1,19 @@
-Transformer language model with sentencepiece tokenizer
-=======================================================
+Training GPT-2 transformer language model with sentencepiece tokenizer
+======================================================================
 
 .. image:: https://img.shields.io/travis/lopuhin/transformer-lm/master.svg
    :target: https://travis-ci.org/lopuhin/transformer-lm
    :alt: Build Status
 
-Training transformer language models (currently only GPT-2) on your own corpora
+Training GPT-2 transformer language model on your own corpora
 with `sentencepiece <https://github.com/google/sentencepiece>`_ tokenization.
+
+This repo contains a PyTorch implementation of GPT-2, which support multi-GPU
+training.
+It also contains a TensorFlow implementation in ``lm/gpt_2_tf``,
+but it is not developed any more. They share the same data preparation scripts.
+TF training command is ``gpt-2-tf-train`` and needs TensorFlow 1.13.
+Documentation below is for PyTorch version.
 
 .. contents::
 
@@ -14,8 +21,8 @@ Installation
 ------------
 
 Python 3.6+ is required. Working in a virtualenv is assumed below.
-`Install <https://www.tensorflow.org/install/pip>`_
-appropriate version of Tensorflow 1.13 first, and then::
+`Install <https://pytorch.org/get-started/locally/>`__
+appropriate version of pytorch first (e.g. ``pip install torch``), and then::
 
     pip install -r requirements.txt
     python setup.py develop
@@ -53,24 +60,29 @@ in below examples we assume they can be listed as ``data/corpora-*``.
 Training
 ++++++++
 
-Currently training of OpenAI GPT-2 model is supported, example command::
+Example command::
 
-    gpt-2-tf-train \
-        run-root data/encoded sp-model.model \
-        --batch-size 32 --sample-num 4 --config small
+    gpt-2 run-root data/encoded sp-model.model
 
-``run-root`` would contain Tensorboard logs,
-model checkpoints and generated samples.
+``run-root`` would contain model checkpoints and json-lines logs,
+which can be plotted in a jupyter notebook with
+``json_log_plots.plot("run-root")``.
+Default hyperparameters correspond to released "small" GPT-2 model.
+
+When multiple GPUs are available, they would be used for training with the
+help of ``torch.distributed``.
 
 License & credits
 -----------------
 
 License is MIT.
 
-GPT-2 model is taken from
+TensorFlow GPT-2 model is taken from
 https://github.com/openai/gpt-2/blob/master/src/model.py
-and GPT-2 training code is based on
+and TensorFlow GPT-2 training code is based on
 https://github.com/nshepperd/gpt-2/blob/finetuning/train.py
+
+PyTorch port is based on original OpenAI code.
 
 Test Shakespeare corpus under ``tests/shakespeare``
 is from http://shakespeare.mit.edu under public domain.

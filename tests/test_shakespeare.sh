@@ -15,33 +15,17 @@ sp-encode \
     tests/shakespeare/sp-model.model \
     tests/shakespeare-encoded
 
-gpt-2-tf-train \
+gpt-2 \
     tests/shakespeare-test-run/ \
     tests/shakespeare-encoded/ \
     tests/shakespeare/sp-model.model \
     --batch-size 4 \
     --accum-gradients 2 \
-    --config tiny \
+    --n-ctx 48 \
+    --n-embed 64 \
+    --n-head 4 \
+    --n-layer 3 \
     --epochs 1 \
     --log-every 2 \
     --save-every 50 \
-    --sample-every 50 \
-    --sample-num 4 \
     --clean
-
-gpt-2-tf-train \
-    tests/shakespeare-test-run/ \
-    tests/shakespeare-encoded/ \
-    tests/shakespeare/sp-model.model \
-    --batch-size 4 \
-    --accum-gradients 2 \
-    --config tiny \
-    --find-lr
-
-gpt-2-tf-train \
-    tests/shakespeare-test-run/ \
-    tests/shakespeare-encoded/ \
-    tests/shakespeare/sp-model.model \
-    --batch-size 4 \
-    --config tiny \
-    --validate

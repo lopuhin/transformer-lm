@@ -2,8 +2,10 @@ language: python
 python:
   - "3.6"
 install:
-  - pip install tensorflow==1.13.1
-  - pip install -r requirements.txt
+  - pip install -q pytest
+  - pip install -q https://download.pytorch.org/whl/cpu/torch-1.0.1.post2-cp36-cp36m-linux_x86_64.whl
+  - pip install -q -r requirements.txt
   - python setup.py develop
 script:
+  - pytest tests
   - ./tests/test_shakespeare.sh
