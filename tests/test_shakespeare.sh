@@ -8,7 +8,7 @@ sp-train \
     tests/shakespeare/ \
     tests/shakespeare/sp-text.txt \
     tests/shakespeare/sp-model \
-    --vocab-size 4000
+    --vocab-size 2000
 
 sp-encode \
     tests/shakespeare/ \
@@ -20,7 +20,7 @@ gpt-2 \
     tests/shakespeare-encoded/ \
     tests/shakespeare/sp-model.model \
     --batch-size 4 \
-    --accum-gradients 2 \
+    --g-accum-gradients 2 \
     --n-ctx 48 \
     --n-embed 64 \
     --n-head 4 \
