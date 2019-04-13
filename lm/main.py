@@ -7,6 +7,7 @@ import sys
 
 import attr
 import fire
+import json_log_plots
 import numpy as np
 import torch.cuda
 import torch.distributed
@@ -15,7 +16,6 @@ import torch.multiprocessing as mp
 from torch import nn, optim
 import tqdm
 import sentencepiece as spm
-import json_log_plots
 
 from .fire_utils import only_allow_defined_args, get_defined_args
 from .model import Model, HParams
@@ -28,7 +28,7 @@ def main(
         epochs=10,
         lr=2.5e-4,
         batch_size=2,
-        accum_gradients=1,  # accumulate gradients N times
+        accum_gradients=32,  # accumulate gradients N times
         n_ctx=1024,
         n_embed=768,
         n_head=12,
