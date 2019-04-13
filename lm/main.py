@@ -9,17 +9,18 @@ import attr
 import fire
 import numpy as np
 import torch.cuda
+import torch.distributed
 import torch.backends.cudnn as cudnn
+import torch.multiprocessing as mp
 from torch import nn, optim
 import tqdm
 import sentencepiece as spm
 import json_log_plots
 
-from .fire_utils import only_allow_defined_args
+from .fire_utils import only_allow_defined_args, get_defined_args
 from .model import Model, HParams
 
 
-@only_allow_defined_args
 def main(
         run_path,
         dataset_path,
@@ -36,9 +37,18 @@ def main(
         log_every=1,
         save_every=1000,
         max_steps=None,
+        # These are set automatically when multiple GPUs are available
         device_id=None,
+        n_devices=None,
         ):
-    # TODO spawn automatically
+    if n_devices is None:
+        n_devices = torch.cuda.device_count()
+        if n_devices > 1:
+            locals_ = locals()
+            kwargs = {a: locals_[a] for a in get_defined_args(main)}
+            mp.spawn(_main_mp, (kwargs,), n_devices)
+            return
+
     is_main = device_id in {0, None}
 
     run_path = Path(run_path)
@@ -69,8 +79,8 @@ def main(
         accum_gradients=accum_gradients,
     )
     params_s = json.dumps(params, indent=4, sort_keys=True, ensure_ascii=False)
-    print(params_s)
     if is_main:
+        print(params_s)
         (run_path / 'params.json').write_text(params_s, encoding='utf8')
 
     dataset_path = Path(dataset_path)
@@ -91,11 +101,14 @@ def main(
     cudnn.benchmark = True
 
     if device_id is not None:
-        print('Initializing process group')
-        torch.distributed.init_process_group(backend='nccl', rank=device_id)
+        print(f'device {device} initializing process group')
+        os.environ['MASTER_PORT'] = '40390'
+        os.environ['MASTER_ADDR'] = '127.0.0.1'
+        torch.distributed.init_process_group(
+            backend='nccl', rank=device_id, world_size=n_devices)
         model = nn.parallel.DistributedDataParallel(
             model, device_ids=[device_id], output_device=device_id)
-        print('done')
+        print(f'process group for {device} initialized')
 
     def train_step():
         context = _gen_batch(
@@ -147,9 +160,10 @@ def main(
                     loss_meter.reset()
 
     except KeyboardInterrupt:
-        print('Interrupted, saving')
-        save()
-        sys.exit(1)
+        if is_main:
+            print('Interrupted, saving')
+            save()
+            sys.exit(1)
 
 
 def _gen_batch(dataset: np.ndarray, n_ctx: int, batch_size: int):
@@ -172,5 +186,12 @@ class AverageMeter:
         self.values.clear()
 
 
+def _main_mp(i, kwargs):
+    """ Wrapper to use with mp.spawn.
+    """
+    kwargs['device_id'] = i
+    return main(**kwargs)
+
+
 def fire_main():
-    fire.Fire(main)
+    fire.Fire(only_allow_defined_args(main))
