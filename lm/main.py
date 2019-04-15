@@ -81,7 +81,7 @@ def main(
         epochs=epochs,
         lr=lr,
         batch_size=batch_size,
-        accum_gradients=accum_gradients,
+        g_accum_gradients=g_accum_gradients,
     )
     params_s = json.dumps(params, indent=4, sort_keys=True, ensure_ascii=False)
     if is_main:
