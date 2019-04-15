@@ -33,6 +33,7 @@ def main(
         n_embed=768,
         n_head=12,
         n_layer=12,
+        n_hidden=None,  # equal to n_embed by default
         clean=False,  # clean run folder
         log_every=1,
         save_every=1000,
@@ -72,6 +73,7 @@ def main(
         n_vocab=len(sp_model),
         n_ctx=n_ctx,
         n_embed=n_embed,
+        n_hidden=n_hidden or n_embed,
         n_head=n_head,
         n_layer=n_layer,
     )
@@ -157,7 +159,8 @@ def main(
                 if step % save_every == 0:
                     save()
                 if max_tokens and step * step_tokens >= max_tokens:
-                    print(f'max_tokens {max_tokens} reached, saving and exiting')
+                    print(f'max_tokens {max_tokens} reached, '
+                          f'saving and exiting')
                     save()
                     return
                 train_step()

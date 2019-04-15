@@ -14,6 +14,7 @@ class HParams:
     n_vocab: int
     n_ctx: int
     n_embed: int
+    n_hidden: int
     n_head: int
     n_layer: int
 
@@ -28,7 +29,12 @@ class Model(nn.Module):
         nn.init.normal_(self.wte.weight, std=0.02)
         self.blocks = nn.ModuleList(
             [Block(hparams) for _ in range(hparams.n_layer)])
-        self.ln_f = Norm(self.hparams.n_embed)
+        self.ln_f = Norm(self.hparams.n_hidden)
+        if hparams.n_hidden != hparams.n_embed:
+            self.in_proj = Conv1D(hparams.n_embed, hparams.n_hidden)
+            self.out_proj = Conv1D(hparams.n_hidden, hparams.n_embed)
+        else:
+            self.in_proj = self.out_proj = None
 
     def forward(self, x, past=None):
         # Embedding
@@ -37,12 +43,16 @@ class Model(nn.Module):
         position = position_for(batch_size, n_ctx, past_length, x.device)
         h = self.wte(x) + self.wpe(position)
         assert h.shape == (batch_size, self.hparams.n_ctx, self.hparams.n_embed)
+        if self.in_proj:
+            h = self.in_proj(h)
         # Transformer
         presents = []
         for i, block in enumerate(self.blocks):
             h, present = block(h, past=past[:, i] if past is not None else None)
             presents.append(present)
         h = self.ln_f(h)
+        if self.out_proj:
+            h = self.out_proj(h)
         # Output logits
         h_flat = h.reshape([batch_size * n_ctx, self.hparams.n_embed])
         logits = torch.matmul(h_flat, self.wte.weight.t())
@@ -56,9 +66,9 @@ class Model(nn.Module):
 class Block(nn.Module):
     def __init__(self, hparams: HParams):
         super().__init__()
-        self.ln_1 = Norm(hparams.n_embed)
-        self.ln_2 = Norm(hparams.n_embed)
-        self.mlp = MLP(hparams.n_embed, hparams.n_embed * 4)
+        self.ln_1 = Norm(hparams.n_hidden)
+        self.ln_2 = Norm(hparams.n_hidden)
+        self.mlp = MLP(hparams.n_hidden, hparams.n_hidden * 4)
         self.attn = Attention(hparams)
 
     def forward(self, x, past):
@@ -103,18 +113,18 @@ class MLP(nn.Module):
 class Attention(nn.Module):
     def __init__(self, hparams: HParams):
         super().__init__()
-        assert hparams.n_embed % hparams.n_head == 0
+        assert hparams.n_hidden % hparams.n_head == 0
         self.hparams = hparams
-        self.c_attn = Conv1D(hparams.n_embed, hparams.n_embed * 3)
-        self.c_proj = Conv1D(hparams.n_embed, hparams.n_embed)
+        self.c_attn = Conv1D(hparams.n_hidden, hparams.n_hidden * 3)
+        self.c_proj = Conv1D(hparams.n_hidden, hparams.n_hidden)
 
     def forward(self, x, past):
         assert len(x.shape) == 3  # [batch, sequence, features]
-        assert x.shape[-1] == self.hparams.n_embed
+        assert x.shape[-1] == self.hparams.n_hidden
         if past is not None:
             # Should be [batch, 2, heads, sequence, features], where 2 is [k, v]
             assert len(past.shape) == 5
-            assert past.shape[-1] == self.hparams.n_embed
+            assert past.shape[-1] == self.hparams.n_hidden
         c = self.c_attn(x)
         q, k, v = map(self.split_heads, torch.split(c, x.shape[-1], dim=2))
         present = torch.stack([k, v], dim=1)
