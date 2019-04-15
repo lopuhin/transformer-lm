@@ -143,7 +143,7 @@ def main(
         optim_path = run_path / 'optim.pt'
         for path in [model_path, optim_path]:
             if path.exists():
-                shutil.copy(path, f'{path.stem}-prev{path.suffix}')
+                shutil.copy(path, run_path / f'{path.stem}-prev{path.suffix}')
         torch.save({'state_dict': model.state_dict(), 'step': step}, model_path)
         torch.save(optimizer.state_dict(), optim_path)
 
