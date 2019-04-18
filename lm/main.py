@@ -102,6 +102,7 @@ def main(
     print(f'Loading dataset from {dataset_path}')
     valid_dataset = np.load(dataset_path / 'valid.npy')
     train_dataset = np.load(dataset_path / 'train.npy')
+    step_tokens = n_ctx * batch_size * g_accum_gradients  # all GPUs
     print(f'Train dataset has {len(train_dataset):,} tokens')
     print(f'Validation dataset has {len(valid_dataset):,} tokens')
 
@@ -116,12 +117,26 @@ def main(
     cudnn.benchmark = True
 
     seen_tokens = 0
-    if model_path.exists():
+
+    def load_model():
+        """ Load model, update seen_tokens value
+        """
+        nonlocal seen_tokens
         state = torch.load(model_path)
-        seen_tokens = state.pop('seen_tokens')
-        model.load_state_dict(state.pop('state_dict'))
+        if 'seen_tokens' in state:
+            seen_tokens = state['seen_tokens']
+        else:  # legacy format
+            seen_tokens = state['step'] * step_tokens
+        state_dict = state.pop('state_dict')
+        if all(k.startswith('module.') for k in state_dict):
+            # legacy multi-GPU format
+            state_dict = {k[len('module.'):]: v for k, v in state_dict.items()}
+        model.load_state_dict(state_dict)
         optimizer.load_state_dict(torch.load(optimizer_path))
         print(f'Resuming from seen_tokens {seen_tokens:,}')
+
+    if model_path.exists():
+        load_model()
 
     if device_id is not None:
         print(f'device {device} initializing process group')
@@ -156,7 +171,6 @@ def main(
 
     def train():
         nonlocal seen_tokens
-        step_tokens = n_ctx * batch_size * g_accum_gradients  # all GPUs
         epoch_size = len(train_dataset) // step_tokens * step_tokens
         pbar = tqdm.trange(
             epochs, desc='epochs', dynamic_ncols=True, disable=not is_main)
@@ -198,7 +212,7 @@ def main(
         validate()
 
     def validate():
-        if not is_main:
+        if not is_main or world_size != 1:
             return
         json_log_plots.write_event(run_path, step=seen_tokens,
                                    valid_loss=get_valid_loss())
@@ -207,7 +221,6 @@ def main(
         """ Run validation, return mean loss. This is a pessimistic score,
         as validation contexts are non-overlapping.
         """
-        # TODO how will this work with multi-GPU?
         model.eval()
         losses = AverageMeter()
         with torch.no_grad():
@@ -227,12 +240,15 @@ def main(
             if path.exists():
                 shutil.copy(path, run_path / f'{path.stem}-prev{path.suffix}')
         torch.save({
-            'state_dict': model.state_dict(),
+            'state_dict': _unwrapped_model(model).state_dict(),
             'seen_tokens': seen_tokens,
         }, model_path)
         torch.save(optimizer.state_dict(), optimizer_path)
 
     if only_validate:
+        if world_size != 1:
+            print('multi-GPU validation is not supported yet')
+            sys.exit(1)
         if is_main:
             print(f'Validation loss: {get_valid_loss():.4f}')
     else:
@@ -267,6 +283,15 @@ def _batch_it(it, batch_size: int):
             yield batch
             batch = []
     yield batch
+
+
+def _unwrapped_model(model: nn.Module) -> nn.Module:
+    """ Return underlying model without data paraller wrapper.
+    """
+    if isinstance(model, nn.parallel.DistributedDataParallel):
+        return model.module
+    else:
+        return model
 
 
 class AverageMeter:
