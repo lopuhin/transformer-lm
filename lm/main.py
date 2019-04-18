@@ -28,7 +28,7 @@ def main(
         epochs=10,
         lr=2.5e-4,
         batch_size=2,  # per GPU
-        g_accum_gradients=32,  # accumulate gradients N times (globally)
+        g_accum_gradients=None,  # accumulate gradients N times (globally)
         n_ctx=1024,
         n_embed=768,
         n_head=12,
@@ -54,6 +54,8 @@ def main(
 
     is_main = device_id in {0, None}
     world_size = max(1, n_devices)
+    if g_accum_gradients is None:
+        g_accum_gradients = world_size
     assert g_accum_gradients % world_size == 0
     accum_gradients = g_accum_gradients // world_size
 
