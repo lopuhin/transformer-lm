@@ -47,6 +47,7 @@ hparams = HParams(
     n_vocab=50,
     n_ctx=7,
     n_embed=32,
+    n_hidden=32,
     n_head=4,
     n_layer=5,
 )
