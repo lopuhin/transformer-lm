@@ -42,7 +42,7 @@ class Model(nn.Module):
         batch_size, n_ctx = x.shape
         position = position_for(batch_size, n_ctx, past_length, x.device)
         h = self.wte(x) + self.wpe(position)
-        assert h.shape == (batch_size, self.hparams.n_ctx, self.hparams.n_embed)
+        assert h.shape == (batch_size, n_ctx, self.hparams.n_embed)
         if self.in_proj:
             h = self.in_proj(h)
         # Transformer

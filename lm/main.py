@@ -19,6 +19,7 @@ import sentencepiece as spm
 
 from .fire_utils import only_allow_defined_args, get_defined_args
 from .model import Model, HParams
+from .inference import fixed_state_dict
 
 
 def main(
@@ -73,6 +74,7 @@ def main(
             shutil.rmtree(run_path)
         run_path.mkdir(exist_ok=True, parents=True)
         run_path_mark.touch()
+        shutil.copy(sp_model_path, run_path / 'sp.model')
 
     sp_model = spm.SentencePieceProcessor()
     sp_model.load(sp_model_path)
@@ -127,10 +129,7 @@ def main(
             seen_tokens = state['seen_tokens']
         else:  # legacy format
             seen_tokens = state['step'] * step_tokens
-        state_dict = state.pop('state_dict')
-        if all(k.startswith('module.') for k in state_dict):
-            # legacy multi-GPU format
-            state_dict = {k[len('module.'):]: v for k, v in state_dict.items()}
+        state_dict = fixed_state_dict(state['state_dict'])
         model.load_state_dict(state_dict)
         optimizer.load_state_dict(torch.load(optimizer_path))
         print(f'Resuming from seen_tokens {seen_tokens:,}')
