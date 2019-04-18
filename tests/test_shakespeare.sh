@@ -19,15 +19,29 @@ gpt-2 \
     tests/shakespeare-test-run/ \
     tests/shakespeare-encoded/ \
     tests/shakespeare/sp-model.model \
-    --batch-size 4 \
+    --batch-size 8 \
     --g-accum-gradients 2 \
     --n-ctx 48 \
     --n-embed 64 \
     --n-hidden 32 \
     --n-head 4 \
     --n-layer 3 \
-    --epochs 1 \
+    --epochs 2 \
     --log-every 2 \
     --save-every 50 \
     --validate-every 100 \
     --clean
+
+# resume training
+gpt-2 \
+    tests/shakespeare-test-run/ \
+    tests/shakespeare-encoded/ \
+    tests/shakespeare/sp-model.model \
+    --batch-size 8 \
+    --g-accum-gradients 2 \
+    --n-ctx 48 \
+    --n-embed 64 \
+    --n-hidden 32 \
+    --n-head 4 \
+    --n-layer 3 \
+    --epochs 2

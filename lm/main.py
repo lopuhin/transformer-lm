@@ -64,6 +64,8 @@ def main(
         validate_every = save_every
 
     run_path = Path(run_path)
+    model_path = run_path / 'model.pt'
+    optimizer_path = run_path / 'optim.pt'
     if is_main:
         run_path_mark = run_path / '.lm'
         if clean and run_path.exists():
@@ -113,6 +115,15 @@ def main(
     loss_meter = AverageMeter()
     cudnn.benchmark = True
 
+    step = 0
+    if model_path.exists():
+        state = torch.load(model_path)
+        step = state.pop('step')
+        model.load_state_dict(state.pop('state_dict'))
+        optimizer.load_state_dict(torch.load(optimizer_path))
+        print(f'Resuming from step {step:,}')
+    initial_step = step
+
     if device_id is not None:
         print(f'device {device} initializing process group')
         os.environ['MASTER_PORT'] = master_port
@@ -123,7 +134,6 @@ def main(
             model, device_ids=[device_id], output_device=device_id)
         print(f'process group for {device} initialized')
 
-    step = 1
     step_tokens = n_ctx * batch_size * g_accum_gradients  # all GPUs
     epoch_size = len(train_dataset) // step_tokens  # all GPUs
     loss_scale = n_ctx * batch_size * accum_gradients / (512 * 4 * 32)
@@ -150,34 +160,45 @@ def main(
 
     def train():
         nonlocal step
-        for epoch in tqdm.trange(1, epochs + 1, desc='epoch',
-                                 dynamic_ncols=True, disable=not is_main):
-            epoch_pbar = tqdm.trange(epoch_size, desc=f'epoch {epoch}',
-                                     dynamic_ncols=True, disable=not is_main)
-            for _ in epoch_pbar:
-                if step % save_every == 0:
-                    save()
-                if max_tokens and step * step_tokens >= max_tokens:
-                    print(f'max_tokens {max_tokens} reached, '
-                          f'saving and exiting')
-                    save()
-                    validate()
-                    return
-                train_step()
-                step += 1
-                epoch_pbar.set_postfix({
-                    'step': step,
-                    'loss': f'{loss_meter.mean():.2f}'})
-                if is_main and step % log_every == 0:
-                    json_log_plots.write_event(
-                        run_path, step=step * step_tokens,
-                        loss=loss_meter.mean())
-                    loss_meter.reset()
-                if step % validate_every == 0:
-                    validate()
-            # end of epoch
-            save()
-            validate()
+        pbar = tqdm.trange(
+            epochs, desc='epochs', dynamic_ncols=True, disable=not is_main)
+        init_epoch_pbar = lambda: tqdm.trange(
+            epoch_size, dynamic_ncols=True, disable=not is_main)
+        epoch_pbar = init_epoch_pbar()
+        pbar.update(step // epoch_size)
+        pbar.refresh()
+        epoch_pbar.update(step % epoch_size)
+        while step < epochs * epoch_size:
+            if max_tokens and step * step_tokens >= max_tokens:
+                print(f'max_tokens {max_tokens} reached, '
+                      f'saving and exiting')
+                save()
+                validate()
+                return
+            train_step()
+            step += 1
+            epoch_pbar.update()
+            epoch_pbar.set_description(f'epoch {1 + step // epoch_size}')
+            epoch_pbar.set_postfix({
+                'step': step,
+                'loss': f'{loss_meter.mean():.2f}'})
+            epoch_pbar.refresh()
+            if step % save_every == 0:
+                save()
+            if is_main and step % log_every == 0:
+                json_log_plots.write_event(
+                    run_path, step=step * step_tokens,
+                    loss=loss_meter.mean())
+                loss_meter.reset()
+            if step % validate_every == 0:
+                validate()
+            if step and step % epoch_size == 0:
+                pbar.update()
+                epoch_pbar.close()
+                epoch_pbar = init_epoch_pbar()
+        # end of training
+        save()
+        validate()
 
     def validate():
         if not is_main:
@@ -206,13 +227,11 @@ def main(
     def save():
         if not is_main:
             return
-        model_path = run_path / 'model.pt'
-        optim_path = run_path / 'optim.pt'
-        for path in [model_path, optim_path]:
+        for path in [model_path, optimizer_path]:
             if path.exists():
                 shutil.copy(path, run_path / f'{path.stem}-prev{path.suffix}')
         torch.save({'state_dict': model.state_dict(), 'step': step}, model_path)
-        torch.save(optimizer.state_dict(), optim_path)
+        torch.save(optimizer.state_dict(), optimizer_path)
 
     if only_validate:
         if is_main:
