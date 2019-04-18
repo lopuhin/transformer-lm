@@ -115,14 +115,13 @@ def main(
     loss_meter = AverageMeter()
     cudnn.benchmark = True
 
-    step = 0
+    seen_tokens = 0
     if model_path.exists():
         state = torch.load(model_path)
-        step = state.pop('step')
+        seen_tokens = state.pop('seen_tokens')
         model.load_state_dict(state.pop('state_dict'))
         optimizer.load_state_dict(torch.load(optimizer_path))
-        print(f'Resuming from step {step:,}')
-    initial_step = step
+        print(f'Resuming from seen_tokens {seen_tokens:,}')
 
     if device_id is not None:
         print(f'device {device} initializing process group')
@@ -133,10 +132,6 @@ def main(
         model = nn.parallel.DistributedDataParallel(
             model, device_ids=[device_id], output_device=device_id)
         print(f'process group for {device} initialized')
-
-    step_tokens = n_ctx * batch_size * g_accum_gradients  # all GPUs
-    epoch_size = len(train_dataset) // step_tokens  # all GPUs
-    loss_scale = n_ctx * batch_size * accum_gradients / (512 * 4 * 32)
 
     def loss_fn(logits, ctx):
         return cross_entropy(
@@ -150,6 +145,7 @@ def main(
             train_dataset, n_ctx=n_ctx, batch_size=batch_size * accum_gradients)
         context = torch.LongTensor(context)
         optimizer.zero_grad()
+        loss_scale = n_ctx * batch_size * accum_gradients / (512 * 4 * 32)
         for ctx in torch.split(context, batch_size):
             ctx = ctx.to(device=device)
             logits = model(ctx)['logits']
@@ -159,40 +155,41 @@ def main(
         optimizer.step()
 
     def train():
-        nonlocal step
+        nonlocal seen_tokens
+        step_tokens = n_ctx * batch_size * g_accum_gradients  # all GPUs
+        epoch_size = len(train_dataset) // step_tokens * step_tokens
         pbar = tqdm.trange(
             epochs, desc='epochs', dynamic_ncols=True, disable=not is_main)
         init_epoch_pbar = lambda: tqdm.trange(
             epoch_size, dynamic_ncols=True, disable=not is_main)
         epoch_pbar = init_epoch_pbar()
-        pbar.update(step // epoch_size)
+        pbar.update(seen_tokens // epoch_size)
         pbar.refresh()
-        epoch_pbar.update(step % epoch_size)
-        while step < epochs * epoch_size:
-            if max_tokens and step * step_tokens >= max_tokens:
+        epoch_pbar.update(seen_tokens % epoch_size)
+        step = 1
+        while seen_tokens < epochs * epoch_size:
+            if max_tokens and seen_tokens >= max_tokens:
                 print(f'max_tokens {max_tokens} reached, '
                       f'saving and exiting')
                 save()
                 validate()
                 return
             train_step()
+            seen_tokens += step_tokens
             step += 1
-            epoch_pbar.update()
-            epoch_pbar.set_description(f'epoch {1 + step // epoch_size}')
-            epoch_pbar.set_postfix({
-                'step': step,
-                'loss': f'{loss_meter.mean():.2f}'})
+            epoch_pbar.update(step_tokens)
+            epoch_pbar.set_description(f'epoch {1 + seen_tokens // epoch_size}')
+            epoch_pbar.set_postfix(loss=f'{loss_meter.mean():.2f}')
             epoch_pbar.refresh()
             if step % save_every == 0:
                 save()
             if is_main and step % log_every == 0:
-                json_log_plots.write_event(
-                    run_path, step=step * step_tokens,
-                    loss=loss_meter.mean())
+                json_log_plots.write_event(run_path, step=seen_tokens,
+                                           loss=loss_meter.mean())
                 loss_meter.reset()
             if step % validate_every == 0:
                 validate()
-            if step and step % epoch_size == 0:
+            if seen_tokens % epoch_size == 0:
                 pbar.update()
                 epoch_pbar.close()
                 epoch_pbar = init_epoch_pbar()
@@ -203,9 +200,8 @@ def main(
     def validate():
         if not is_main:
             return
-        json_log_plots.write_event(
-            run_path, step=step * step_tokens,
-            valid_loss=get_valid_loss())
+        json_log_plots.write_event(run_path, step=seen_tokens,
+                                   valid_loss=get_valid_loss())
 
     def get_valid_loss():
         """ Run validation, return mean loss. This is a pessimistic score,
@@ -230,7 +226,10 @@ def main(
         for path in [model_path, optimizer_path]:
             if path.exists():
                 shutil.copy(path, run_path / f'{path.stem}-prev{path.suffix}')
-        torch.save({'state_dict': model.state_dict(), 'step': step}, model_path)
+        torch.save({
+            'state_dict': model.state_dict(),
+            'seen_tokens': seen_tokens,
+        }, model_path)
         torch.save(optimizer.state_dict(), optimizer_path)
 
     if only_validate:

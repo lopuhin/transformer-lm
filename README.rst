@@ -73,6 +73,10 @@ Default hyperparameters correspond to released "small" GPT-2 model.
 When multiple GPUs are available, they would be used for training with the
 help of ``torch.distributed``.
 
+If the path exists and ``--clean`` key is NOT passed, training would be resumed.
+Note that all parameters still need to be specified and
+model parameters need to match.
+
 Notes on training parameters:
 
 - ``--batch-size`` is per-GPU, so you don't need to re-tune it when changing
