@@ -37,6 +37,8 @@ def main(
         clean=False,  # clean run folder
         log_every=1,
         save_every=1000,
+        validate_every=None,  # same as save_every by default
+        only_validate=False,
         max_tokens=None,
         master_port='40390',
         master_addr='127.0.0.1',
@@ -58,6 +60,8 @@ def main(
         g_accum_gradients = world_size
     assert g_accum_gradients % world_size == 0
     accum_gradients = g_accum_gradients // world_size
+    if validate_every is None:
+        validate_every = save_every
 
     run_path = Path(run_path)
     if is_main:
@@ -104,7 +108,7 @@ def main(
     else:
         device = torch.device('cpu')
     model = Model(hparams).to(device)
-    loss_fn = nn.CrossEntropyLoss()
+    cross_entropy = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
     loss_meter = AverageMeter()
     cudnn.benchmark = True
@@ -124,32 +128,25 @@ def main(
     epoch_size = len(train_dataset) // step_tokens  # all GPUs
     loss_scale = n_ctx * batch_size * accum_gradients / (512 * 4 * 32)
 
+    def loss_fn(logits, ctx):
+        return cross_entropy(
+            input=logits[:, :-1].reshape([-1, logits.shape[-1]]),
+            target=ctx[:, 1:].reshape(-1))
+
     def train_step():
         """ Train step on one GPU.
         """
-        context = _gen_batch(
+        context = _gen_training_batch(
             train_dataset, n_ctx=n_ctx, batch_size=batch_size * accum_gradients)
         context = torch.LongTensor(context)
         optimizer.zero_grad()
         for ctx in torch.split(context, batch_size):
             ctx = ctx.to(device=device)
             logits = model(ctx)['logits']
-            loss = loss_fn(input=logits[:, :-1].reshape([-1, logits.shape[-1]]),
-                           target=ctx[:, 1:].reshape(-1))
+            loss = loss_fn(logits, ctx)
             (loss * loss_scale).backward()
             loss_meter.update(float(loss.item()))
         optimizer.step()
-
-    def save():
-        if not is_main:
-            return
-        model_path = run_path / 'model.pt'
-        optim_path = run_path / 'optim.pt'
-        for path in [model_path, optim_path]:
-            if path.exists():
-                shutil.copy(path, run_path / f'{path.stem}-prev{path.suffix}')
-        torch.save({'state_dict': model.state_dict(), 'step': step}, model_path)
-        torch.save(optimizer.state_dict(), optim_path)
 
     def train():
         nonlocal step
@@ -164,32 +161,94 @@ def main(
                     print(f'max_tokens {max_tokens} reached, '
                           f'saving and exiting')
                     save()
+                    validate()
                     return
                 train_step()
                 step += 1
                 epoch_pbar.set_postfix({
                     'step': step,
                     'loss': f'{loss_meter.mean():.2f}'})
-                if step % log_every == 0 and is_main:
+                if is_main and step % log_every == 0:
                     json_log_plots.write_event(
-                        run_path,
-                        step=step * step_tokens,
+                        run_path, step=step * step_tokens,
                         loss=loss_meter.mean())
                     loss_meter.reset()
-
-    try:
-        train()
-    except KeyboardInterrupt:
-        if is_main:
-            print('Interrupted, saving')
+                if step % validate_every == 0:
+                    validate()
+            # end of epoch
             save()
-            sys.exit(1)
+            validate()
+
+    def validate():
+        if not is_main:
+            return
+        json_log_plots.write_event(
+            run_path, step=step * step_tokens,
+            valid_loss=get_valid_loss())
+
+    def get_valid_loss():
+        """ Run validation, return mean loss. This is a pessimistic score,
+        as validation contexts are non-overlapping.
+        """
+        # TODO how will this work with multi-GPU?
+        model.eval()
+        losses = AverageMeter()
+        with torch.no_grad():
+            for ctx in _valid_batch_iter(
+                    valid_dataset, batch_size=batch_size, n_ctx=n_ctx):
+                ctx = torch.LongTensor(ctx).to(device)
+                logits = model(ctx)['logits']
+                loss = loss_fn(logits, ctx)
+                losses.update(float(loss.item()))
+        model.train()
+        return losses.mean()
+
+    def save():
+        if not is_main:
+            return
+        model_path = run_path / 'model.pt'
+        optim_path = run_path / 'optim.pt'
+        for path in [model_path, optim_path]:
+            if path.exists():
+                shutil.copy(path, run_path / f'{path.stem}-prev{path.suffix}')
+        torch.save({'state_dict': model.state_dict(), 'step': step}, model_path)
+        torch.save(optimizer.state_dict(), optim_path)
+
+    if only_validate:
+        if is_main:
+            print('Validation loss: {validate():.4f}')
+    else:
+        try:
+            train()
+        except KeyboardInterrupt:
+            if is_main:
+                print('Interrupted, saving')
+                save()
+                sys.exit(1)
 
 
-def _gen_batch(dataset: np.ndarray, n_ctx: int, batch_size: int):
+def _gen_training_batch(dataset: np.ndarray, n_ctx: int, batch_size: int):
     indices = [np.random.randint(0, len(dataset) - n_ctx)
                for _ in range(batch_size)]
     return [dataset[idx: idx + n_ctx] for idx in indices]
+
+
+def _valid_batch_iter(dataset: np.ndarray, *, batch_size: int, n_ctx: int):
+    start_indices = range(0, len(dataset) - n_ctx, n_ctx)
+    return _batch_it(
+        (dataset[start_idx: start_idx + n_ctx] for start_idx in tqdm.tqdm(
+            start_indices, desc='validation', leave=False)),
+        batch_size=batch_size)
+
+
+def _batch_it(it, batch_size: int):
+    batch = []
+    for x in it:
+        batch.append(x)
+        if len(batch) == batch_size:
+            yield batch
+            batch = []
+    yield batch
 
 
 class AverageMeter:

@@ -29,4 +29,5 @@ gpt-2 \
     --epochs 1 \
     --log-every 2 \
     --save-every 50 \
+    --validate-every 100 \
     --clean
