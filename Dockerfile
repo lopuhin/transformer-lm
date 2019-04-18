@@ -5,7 +5,7 @@ ENV LC_ALL C.UTF-8
 
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y \
-        python3-pip
+        python3-pip vim htop
 
 RUN pip3 install -U pip wheel
 RUN pip3 install https://download.pytorch.org/whl/cu100/torch-1.0.1.post2-cp36-cp36m-linux_x86_64.whl && \
