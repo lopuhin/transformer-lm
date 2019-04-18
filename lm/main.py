@@ -33,7 +33,7 @@ def main(
         n_embed=768,
         n_head=12,
         n_layer=12,
-        n_hidden=None,  # equal to n_embed by default
+        n_hidden=None,  # equal to n_embed by default (better leave at None)
         clean=False,  # clean run folder
         log_every=1,
         save_every=1000,
