@@ -234,7 +234,7 @@ def main(
 
     if only_validate:
         if is_main:
-            print('Validation loss: {validate():.4f}')
+            print(f'Validation loss: {get_valid_loss():.4f}')
     else:
         try:
             train()
