@@ -2,7 +2,7 @@
 
 {% block extra_head %}
     <style>
-        .log-prob-table td:nth-child(2) {
+        .log-prob-table td:last-child {
             text-align: right;
         }
         .log-prob-table td {
@@ -37,6 +37,13 @@
                    style="margin-left: 0"/>
             <input type="submit" name="score_occurred"
                    value="Score occurred tokens"/>
+            <input type="checkbox"
+                   {% if lines_as_separate %}checked="checked"{% endif %}
+                   id="lines_as_separate" name="lines_as_separate"/>
+            <label for="lines_as_separate">
+                treat each line as a separate text
+            </label>
+
         </div>
     </form>
 
@@ -53,7 +60,7 @@
             </thead>
             <tbody>
             <tr>
-                {% for log_prob, token in next_token_prediction %}
+                {% for token, log_prob in next_token_prediction %}
                     <tr>
                         <td>{{ token }}</td>
                         <td>{{ "%.3f"|format(log_prob) }}</td>
@@ -70,14 +77,16 @@
         <table class="log-prob-table">
             <thead>
             <tr>
+                <th>Text No.</th>
                 <th>Token</th>
                 <th>Log probability</th>
             </tr>
             </thead>
             <tbody>
             <tr>
-                {% for log_prob, token in occurred_scores %}
+                {% for text_no, token, log_prob in occurred_scores %}
                     <tr>
+                        <td>{{ text_no }}</td>
                         <td>{{ token }}</td>
                         <td>{{ "%.3f"|format(log_prob) }}</td>
                     </tr>

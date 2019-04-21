@@ -20,16 +20,31 @@ INITIAL_TEXT = 'Она открыла дверь на'
 @aiohttp_jinja2.template('index.jinja2')
 def index(request):
     text = request.query.get('text', INITIAL_TEXT)
-    ctx = {'text': text}
+    lines_as_separate = bool(request.query.get('lines_as_separate'))
+    ctx = {'text': text, 'lines_as_separate': lines_as_separate}
     model: ModelWrapper = app['model']
+
     if request.query.get('predict_next_token'):
         next_top_k = model.get_next_top_k(tokenize(text), top_k=10)
+        next_top_k = [[token, log_prob] for log_prob, token in next_top_k]
         ctx['next_token_prediction'] = next_top_k
-        ctx['next_token_prediction_csv'] = to_csv_data_url(next_top_k)
+        ctx['next_token_prediction_csv'] = to_csv_data_url(
+            next_top_k, ['token', 'log_prob'])
+
     elif request.query.get('score_occurred'):
-        occurred_scores = model.get_occurred_log_probs(tokenize(text))
+        if lines_as_separate:
+            texts = [t.strip() for t in text.split('\n')]
+            texts = list(filter(None, texts))
+        else:
+            texts = [text]
+        occurred_scores = []
+        for i, t in enumerate(texts, 1):
+            occurred_scores.extend(
+                (i, token, log_prob) for log_prob, token in
+                model.get_occurred_log_probs(tokenize(t)))
         ctx['occurred_scores'] = occurred_scores
-        ctx['occurred_scores_csv'] = to_csv_data_url(occurred_scores)
+        ctx['occurred_scores_csv'] = to_csv_data_url(
+            occurred_scores, ['text_no', 'token', 'log_prob'])
     return ctx
 
 
@@ -39,14 +54,13 @@ def tokenize(text: str) -> List[str]:
     return tokens
 
 
-def to_csv_data_url(data: List[Tuple[float, str]]) -> str:
+def to_csv_data_url(data: List[List], header: List[str]) -> str:
     """ Return data url with base64-encoded csv.
     """
     f = io.StringIO()
     writer = csv.writer(f)
-    # reorder columns to match the UI
-    writer.writerow(['token', 'log_prob'])
-    writer.writerows([token, log_prob] for log_prob, token in data)
+    writer.writerow(header)
+    writer.writerows(data)
     b64data = base64.b64encode(f.getvalue().encode('utf8')).decode('ascii')
     return f'data:text/csv;base64,{b64data}'
 
