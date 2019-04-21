@@ -1,0 +1,77 @@
+{% extends "base.jinja2" %}
+
+{% block extra_head %}
+    <style>
+        .log-prob-table td:nth-child(2) {
+            text-align: right;
+        }
+        .log-prob-table td {
+            height: 1.5em;
+        }
+        .log-prob-table td {
+            border-bottom: 1px silver solid;
+        }
+        .log-prob-table {
+            border-collapse: collapse;
+        }
+    </style>
+{% endblock %}
+
+{% block body %}
+
+    <h1>Russian Language Model</h1>
+    <form method="GET" action="">
+        <div>
+            <textarea style="width: 100%" name="text">{{ text }}</textarea>
+        </div>
+        <div>
+            <input type="submit" name="predict_next_token"
+                   value="Predict next token"/>
+            <input type="submit" name="score_occurred"
+                   value="Score occurred tokens"/>
+        </div>
+    </form>
+
+    {% if next_token_prediction %}
+        <p>Next token prediction:</p>
+        <table class="log-prob-table">
+            <thead>
+                <tr>
+                    <th>Token</th>
+                    <th>Log probability</th>
+                </tr>
+            </thead>
+            <tbody>
+            <tr>
+                {% for log_prob, token in next_token_prediction %}
+                    <tr>
+                        <td>{{ token }}</td>
+                        <td>{{ "%.3f"|format(log_prob) }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+
+    {% if occurred_scores %}
+        <p>Log probabilities of occurred tokens:</p>
+        <table class="log-prob-table">
+            <thead>
+            <tr>
+                <th>Token</th>
+                <th>Log probability</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr>
+                {% for log_prob, token in occurred_scores %}
+                    <tr>
+                        <td>{{ token }}</td>
+                        <td>{{ "%.3f"|format(log_prob) }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+
+{% endblock %}
