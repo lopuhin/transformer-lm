@@ -14,6 +14,13 @@
         .log-prob-table {
             border-collapse: collapse;
         }
+        input[type="submit"] {
+            font-size: 100%;
+        }
+        textarea {
+            font-size: 100%;
+            width: 100%;
+        }
     </style>
 {% endblock %}
 
@@ -22,11 +29,12 @@
     <h1>Russian Language Model</h1>
     <form method="GET" action="">
         <div>
-            <textarea style="width: 100%" name="text">{{ text }}</textarea>
+            <textarea name="text">{{ text }}</textarea>
         </div>
         <div>
             <input type="submit" name="predict_next_token"
-                   value="Predict next token"/>
+                   value="Predict next token"
+                   style="margin-left: 0"/>
             <input type="submit" name="score_occurred"
                    value="Score occurred tokens"/>
         </div>
