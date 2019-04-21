@@ -41,7 +41,9 @@
     </form>
 
     {% if next_token_prediction %}
-        <p>Next token prediction:</p>
+        <p>Log probabilities of next token predictions
+            [<a href="{{ next_token_prediction_csv }}"
+               download="next_token_prediction.csv">csv</a>]:</p>
         <table class="log-prob-table">
             <thead>
                 <tr>
@@ -62,7 +64,9 @@
     {% endif %}
 
     {% if occurred_scores %}
-        <p>Log probabilities of occurred tokens:</p>
+        <p>Log probabilities of occurred tokens
+            [<a href="{{ occurred_scores_csv }}"
+                   download="occurred_scores.csv">csv</a>]:</p>
         <table class="log-prob-table">
             <thead>
             <tr>
