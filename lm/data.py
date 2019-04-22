@@ -6,10 +6,7 @@ import numpy as np
 import sentencepiece as spm
 import tqdm
 
-
-UNK = '<unk>'
-END_OF_LINE = '<endofline>'
-END_OF_TEXT = '<endoftext>'
+from .common import UNK, END_OF_TEXT, END_OF_LINE
 
 
 def sp_train():

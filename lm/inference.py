@@ -6,7 +6,7 @@ import sentencepiece as spm
 import torch
 
 from .model import Model, HParams
-from .data import END_OF_LINE, END_OF_TEXT
+from .common import END_OF_LINE, END_OF_TEXT
 
 
 class ModelWrapper:

@@ -1,0 +1,4 @@
+attrs==19.1.0
+numpy==1.16.2
+https://download.pytorch.org/whl/cpu/torch-1.0.1.post2-cp36-cp36m-linux_x86_64.whl
+sentencepiece==0.1.8
