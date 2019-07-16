@@ -100,6 +100,7 @@ Example command::
 ``"Artificial intelligence"`` is the text prefix used as a starting point for generating tokens
 
 Notes on inference parameters:
+
 - ``--tokens-to-generate``: number of tokens to generate, default is 42
 - ``--top-k``: number of token candidates to generate for each position (beam width), default is 8.
 
