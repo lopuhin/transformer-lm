@@ -89,6 +89,22 @@ Notes on training parameters:
   or ``--n-ctx``: loss is already scaled appropriately.
 
 
+Inference
++++++++++
+
+Example command::
+
+    gpt-2-gen run-root "Artificial intelligence"
+
+``run-root`` would contain model checkpoints
+``"Artificial intelligence"`` is the text prefix used as a starting point for generating tokens
+
+Notes on inference parameters:
+
+- ``--tokens-to-generate``: number of tokens to generate, default is 42
+- ``--top-k``: number of token candidates to generate for each position (beam width), default is 8.
+
+
 License & credits
 -----------------
 
