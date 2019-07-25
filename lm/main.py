@@ -30,6 +30,7 @@ def main(
         lr=2.5e-4,
         batch_size=2,  # per GPU
         g_accum_gradients=None,  # accumulate gradients N times (globally)
+        gradient_checkpointing=False, # saves GPU memory
         n_ctx=1024,
         n_embed=768,
         n_head=12,
@@ -86,6 +87,7 @@ def main(
         n_hidden=n_hidden or n_embed,
         n_head=n_head,
         n_layer=n_layer,
+        gradient_checkpointing=gradient_checkpointing,
     )
     params = dict(
         hparams=attr.asdict(hparams),
