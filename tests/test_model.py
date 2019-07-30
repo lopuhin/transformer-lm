@@ -50,6 +50,7 @@ hparams = HParams(
     n_hidden=32,
     n_head=4,
     n_layer=5,
+    gradient_checkpointing=False,
 )
 
 

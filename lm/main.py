@@ -30,6 +30,7 @@ def main(
         lr=2.5e-4,
         batch_size=2,  # per GPU
         g_accum_gradients=None,  # accumulate gradients N times (globally)
+        gradient_checkpointing=False, # saves GPU memory
         n_ctx=1024,
         n_embed=768,
         n_head=12,
@@ -86,6 +87,7 @@ def main(
         n_hidden=n_hidden or n_embed,
         n_head=n_head,
         n_layer=n_layer,
+        gradient_checkpointing=gradient_checkpointing,
     )
     params = dict(
         hparams=attr.asdict(hparams),
@@ -225,6 +227,8 @@ def main(
         with torch.no_grad():
             for ctx in _valid_batch_iter(
                     valid_dataset, batch_size=batch_size, n_ctx=n_ctx):
+                if not ctx:
+                    continue
                 ctx = torch.LongTensor(ctx).to(device)
                 logits = model(ctx)['logits']
                 loss = loss_fn(logits, ctx)

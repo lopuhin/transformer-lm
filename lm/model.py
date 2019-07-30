@@ -7,7 +7,7 @@ import attr
 import torch
 from torch import nn
 from torch.nn import functional as F
-
+import torch.utils.checkpoint
 
 @attr.s(auto_attribs=True, frozen=True)
 class HParams:
@@ -17,6 +17,7 @@ class HParams:
     n_hidden: int
     n_head: int
     n_layer: int
+    gradient_checkpointing: bool
 
 
 class Model(nn.Module):
@@ -48,7 +49,10 @@ class Model(nn.Module):
         # Transformer
         presents = []
         for i, block in enumerate(self.blocks):
-            h, present = block(h, past=past[:, i] if past is not None else None)
+            if self.hparams.gradient_checkpointing:
+                h, present = torch.utils.checkpoint.checkpoint(block, h, past[:, i] if past is not None else None)
+            else:
+                h, present = block(h, past=past[:, i] if past is not None else None)
             presents.append(present)
         h = self.ln_f(h)
         if self.out_proj:
