@@ -18,7 +18,7 @@ class HParams:
     n_hidden: int
     n_head: int
     n_layer: int
-    gradient_checkpointing: bool
+    gradient_checkpointing: bool = False
 
 
 class Model(nn.Module):
