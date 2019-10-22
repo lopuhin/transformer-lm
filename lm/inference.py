@@ -76,8 +76,12 @@ class ModelWrapper:
                        for i in next_log_probs.argsort()[-top_k:]],
                       reverse=True)
 
-    def generate_tokens(self, tokens_prefix: List[str], tokens_to_generate: int, top_k: int) -> List[str]:
-
+    def generate_tokens(
+            self,
+            tokens_prefix: List[str],
+            tokens_to_generate: int,
+            top_k: int,
+            ) -> List[str]:
         tokens = list(tokens_prefix)
 
         for i in range(tokens_to_generate):
@@ -92,7 +96,6 @@ class ModelWrapper:
             # pick next token randomly according to probs distribution
             next_token_n = np.random.choice(top_k, p=probs)
             next_token = ntk[next_token_n][1]
-            # print (next_token)
             
             tokens.append(next_token)
 
@@ -105,16 +108,17 @@ def fixed_state_dict(state_dict):
         state_dict = {k[len('module.'):]: v for k, v in state_dict.items()}
     return state_dict
 
-def gen_main(model_path, prefix, tokens_to_generate=42, top_k=8):
 
-    print("loading model from %s" % model_path)
+def gen_main(model_path, prefix, tokens_to_generate=42, top_k=8):
+    print(f'loading model from {model_path}')
     mw = ModelWrapper.load(Path(model_path))
 
-    print("generating text for prefix %s" % prefix)
+    print(f'generating text for prefix {prefix}')
     tokens = mw.tokenize(prefix)
 
     tokens_gen = mw.generate_tokens(tokens, tokens_to_generate, top_k)
     print(mw.sp_model.DecodePieces(tokens_gen))
+
 
 def fire_gen_main():
     fire.Fire(only_allow_defined_args(gen_main))
