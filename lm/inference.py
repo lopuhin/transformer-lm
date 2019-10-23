@@ -5,8 +5,6 @@ from typing import List, Tuple
 import sentencepiece as spm
 import torch
 import numpy as np
-import fire
-from .fire_utils import only_allow_defined_args
 
 from .model import Model, HParams
 from .common import END_OF_LINE, END_OF_TEXT
@@ -107,18 +105,3 @@ def fixed_state_dict(state_dict):
         # legacy multi-GPU format
         state_dict = {k[len('module.'):]: v for k, v in state_dict.items()}
     return state_dict
-
-
-def gen_main(model_path, prefix, tokens_to_generate=42, top_k=8):
-    print(f'loading model from {model_path}')
-    mw = ModelWrapper.load(Path(model_path))
-
-    print(f'generating text for prefix {prefix}')
-    tokens = mw.tokenize(prefix)
-
-    tokens_gen = mw.generate_tokens(tokens, tokens_to_generate, top_k)
-    print(mw.sp_model.DecodePieces(tokens_gen))
-
-
-def fire_gen_main():
-    fire.Fire(only_allow_defined_args(gen_main))
