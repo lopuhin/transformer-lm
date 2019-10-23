@@ -37,8 +37,8 @@ def main(
         n_layer=12,
         n_hidden=None,  # equal to n_embed by default (better leave at None)
         clean=False,  # clean run folder
-        log_every=1,
-        save_every=1000,
+        log_every=20,
+        save_every=10000,
         validate_every=None,  # same as save_every by default
         only_validate=False,
         max_tokens=None,
