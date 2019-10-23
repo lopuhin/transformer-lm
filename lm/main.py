@@ -47,6 +47,7 @@ def main(
         # These are set automatically when multiple GPUs are available
         device_id=None,
         n_devices=None,
+        opt_level=None,  # apex.amp opt level (e.g. "O1")
         ):
     if n_devices is None:
         n_devices = torch.cuda.device_count()
@@ -119,6 +120,10 @@ def main(
     optimizer = optim.Adam(model.parameters(), lr=lr)
     loss_meter = AverageMeter()
     cudnn.benchmark = True
+    if opt_level:
+        from apex import amp
+        model, optimizer = amp.initialize(
+            model, optimizer, opt_level=opt_level)
 
     seen_tokens = 0
 
@@ -166,7 +171,12 @@ def main(
             ctx = ctx.to(device=device)
             logits = model(ctx)['logits']
             loss = loss_fn(logits, ctx)
-            (loss * loss_scale).backward()
+            loss_b = loss * loss_scale
+            if opt_level:
+                with amp.scale_loss(loss_b, optimizer) as scaled_loss:
+                    scaled_loss.backward()
+            else:
+                loss_b.backward()
             loss_meter.update(float(loss.item()))
         optimizer.step()
 

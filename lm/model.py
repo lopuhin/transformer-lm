@@ -175,7 +175,7 @@ class Attention(nn.Module):
         _, _, nd, ns = w.shape
         b = self.attention_mask(nd, ns, dtype=w.dtype, device=w.device)
         b = b.reshape((1, 1, nd, ns))
-        w = w * b - 1e10 * (1 - b)
+        w = w * b - 1e4 * (1 - b)
         return w
 
     @staticmethod
