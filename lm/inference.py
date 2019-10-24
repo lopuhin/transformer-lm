@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Optional, Dict
 
 import sentencepiece as spm
 import torch
@@ -14,21 +14,26 @@ class ModelWrapper:
     END_OF_LINE = END_OF_LINE
     END_OF_TEXT = END_OF_TEXT
 
-    def __init__(self, model: Model, sp_model: spm.SentencePieceProcessor):
+    def __init__(self, model: Model, sp_model: spm.SentencePieceProcessor,
+                 params: Optional[Dict]):
         self.model = model
         self.sp_model = sp_model
+        self.params = params or {}
 
     @classmethod
     def load(cls, root: Path):
         sp_model = spm.SentencePieceProcessor()
         sp_model.load(str(root / 'sp.model'))
-        hparams = json.loads((root / 'params.json').read_text())['hparams']
+        params = json.loads((root / 'params.json').read_text())
+        hparams = params['hparams']
         hparams.setdefault('n_hidden', hparams['n_embed'])
         model = Model(HParams(**hparams))
         state = torch.load(root / 'model.pt', map_location='cpu')
         state_dict = fixed_state_dict(state['state_dict'])
         model.load_state_dict(state_dict)
-        return cls(model, sp_model)
+        if 'seen_tokens' in state:
+            params['seen_tokens'] = state['seen_tokens']
+        return cls(model, sp_model, params=params)
 
     def tokenize(self, s: str) -> List[str]:
         return self.sp_model.EncodeAsPieces(s)
