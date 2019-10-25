@@ -4,6 +4,7 @@ from pathlib import Path
 import statistics
 import shutil
 import sys
+from typing import Optional, List
 
 import attr
 import fire
@@ -42,12 +43,16 @@ def main(
         validate_every=None,  # same as save_every by default
         only_validate=False,
         max_tokens=None,
+        opt_level=None,  # apex.amp opt level (e.g. "O1")
+        # train on contexts starting from sentence start
+        sample_sentences=False,
+        verbose=False,  # print all training contexts
+        # Multi-GPU related settings
         master_port='40390',
         master_addr='127.0.0.1',
-        # These are set automatically when multiple GPUs are available
+        # These two are set automatically when multiple GPUs are available
         device_id=None,
         n_devices=None,
-        opt_level=None,  # apex.amp opt level (e.g. "O1")
         ):
     if n_devices is None:
         n_devices = torch.cuda.device_count()
@@ -111,6 +116,15 @@ def main(
     print(f'Train dataset has {len(train_dataset):,} tokens')
     print(f'Validation dataset has {len(valid_dataset):,} tokens')
 
+    sample_index = None
+    if sample_sentences:
+        # a very very dump implementation for a start
+        period_id = sp_model.piece_to_id('.')
+        print('building sample_index')
+        sample_index, = np.nonzero(train_dataset == period_id)
+        sample_index += 1
+        print(f'sample_index size {len(sample_index):,}')
+
     if torch.cuda.is_available():
         device = torch.device('cuda', index=device_id)
     else:
@@ -163,7 +177,15 @@ def main(
         """ Train step on one GPU.
         """
         context = _gen_training_batch(
-            train_dataset, n_ctx=n_ctx, batch_size=batch_size * accum_gradients)
+            train_dataset,
+            n_ctx=n_ctx,
+            batch_size=batch_size * accum_gradients,
+            sample_index=sample_index)
+        if verbose:
+            print()
+            for ctx in context:
+                print(repr(sp_model.decode_ids(list(map(int, ctx)))))
+            print()
         context = torch.LongTensor(context)
         optimizer.zero_grad()
         loss_scale = n_ctx * batch_size * accum_gradients / (512 * 4 * 32)
@@ -274,9 +296,14 @@ def main(
                 sys.exit(1)
 
 
-def _gen_training_batch(dataset: np.ndarray, n_ctx: int, batch_size: int):
-    indices = [np.random.randint(0, len(dataset) - n_ctx)
-               for _ in range(batch_size)]
+def _gen_training_batch(
+        dataset: np.ndarray, n_ctx: int, batch_size: int,
+        sample_index: Optional[np.ndarray]) -> List[np.ndarray]:
+    if sample_index is not None:
+        indices = np.random.choice(sample_index, batch_size)
+    else:
+        indices = [np.random.randint(0, len(dataset) - n_ctx)
+                   for _ in range(batch_size)]
     return [dataset[idx: idx + n_ctx] for idx in indices]
 
 
