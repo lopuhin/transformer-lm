@@ -131,14 +131,15 @@ def main(
         """ Load model, update seen_tokens value
         """
         nonlocal seen_tokens
-        state = torch.load(model_path)
+        state = torch.load(model_path, map_location=device)
         if 'seen_tokens' in state:
             seen_tokens = state['seen_tokens']
         else:  # legacy format
             seen_tokens = state['step'] * step_tokens
         state_dict = fixed_state_dict(state['state_dict'])
         model.load_state_dict(state_dict)
-        optimizer.load_state_dict(torch.load(optimizer_path))
+        optimizer.load_state_dict(
+            torch.load(optimizer_path, map_location=device))
         print(f'Resuming from seen_tokens {seen_tokens:,}')
 
     if model_path.exists():
