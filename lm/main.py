@@ -118,7 +118,7 @@ def main(
 
     sample_index = None
     if sample_sentences:
-        # a very very dump implementation for a start
+        # a very very dumb implementation for a start
         period_id = sp_model.piece_to_id('.')
         print('building sample_index')
         sample_index, = np.nonzero(train_dataset == period_id)
