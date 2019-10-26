@@ -300,7 +300,9 @@ def _gen_training_batch(
         dataset: np.ndarray, n_ctx: int, batch_size: int,
         sample_index: Optional[np.ndarray]) -> List[np.ndarray]:
     if sample_index is not None:
-        indices = np.random.choice(sample_index, batch_size)
+        indices = np.clip(
+            np.random.choice(sample_index, batch_size),
+            0, len(dataset) - n_ctx - 1)
     else:
         indices = [np.random.randint(0, len(dataset) - n_ctx)
                    for _ in range(batch_size)]
