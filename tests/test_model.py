@@ -80,7 +80,6 @@ def test_model(device):
     x = x.to(device)
     model.to(device)
     result = model(x)
-    presents = result['presents']
     assert result['logits'].shape == (2, hparams.n_ctx, hparams.n_vocab)
     assert result['presents'].shape == (
         2, hparams.n_layer, 2, hparams.n_head, hparams.n_ctx,

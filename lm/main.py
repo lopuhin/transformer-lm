@@ -116,14 +116,12 @@ def main(
     print(f'Train dataset has {len(train_dataset):,} tokens')
     print(f'Validation dataset has {len(valid_dataset):,} tokens')
 
-    sample_index = None
     if sample_sentences:
-        # a very very dumb implementation for a start
-        period_id = sp_model.piece_to_id('.')
-        print('building sample_index')
-        sample_index, = np.nonzero(train_dataset == period_id)
-        sample_index += 1
-        print(f'sample_index size {len(sample_index):,}')
+        train_sample_index, valid_sample_index = [
+            _sentense_sample_index(dataset, n_ctx, sp_model)
+            for dataset in [train_dataset, valid_dataset]]
+    else:
+        train_sample_index = valid_sample_index = None
 
     if torch.cuda.is_available():
         device = torch.device('cuda', index=device_id)
@@ -181,7 +179,7 @@ def main(
             train_dataset,
             n_ctx=n_ctx,
             batch_size=batch_size * accum_gradients,
-            sample_index=sample_index)
+            sample_index=train_sample_index)
         if verbose:
             print()
             for ctx in context:
@@ -259,7 +257,8 @@ def main(
         losses = AverageMeter()
         with torch.no_grad():
             for ctx in _valid_batch_iter(
-                    valid_dataset, batch_size=batch_size, n_ctx=n_ctx):
+                    valid_dataset, batch_size=batch_size, n_ctx=n_ctx,
+                    sample_index=valid_sample_index):
                 if not ctx:
                     continue
                 ctx = torch.LongTensor(ctx).to(device)
@@ -297,21 +296,36 @@ def main(
                 sys.exit(1)
 
 
+def _sentense_sample_index(dataset: np.ndarray, n_ctx: int, sp_model):
+    # a very very dumb implementation for a start
+    period_id = sp_model.piece_to_id('.')
+    sample_index = np.nonzero(dataset == period_id)[0] + 1
+    return np.clip(sample_index, 0, len(dataset) - n_ctx - 1)
+
+
 def _gen_training_batch(
         dataset: np.ndarray, n_ctx: int, batch_size: int,
         sample_index: Optional[np.ndarray]) -> List[np.ndarray]:
     if sample_index is not None:
-        indices = np.clip(
-            np.random.choice(sample_index, batch_size),
-            0, len(dataset) - n_ctx - 1)
+        indices = np.random.choice(sample_index, batch_size)
     else:
         indices = [np.random.randint(0, len(dataset) - n_ctx)
                    for _ in range(batch_size)]
     return [dataset[idx: idx + n_ctx] for idx in indices]
 
 
-def _valid_batch_iter(dataset: np.ndarray, *, batch_size: int, n_ctx: int):
-    start_indices = range(0, len(dataset) - n_ctx, n_ctx)
+def _valid_batch_iter(
+        dataset: np.ndarray, *, batch_size: int, n_ctx: int,
+        sample_index: Optional[np.ndarray] = None,
+        ):
+    if sample_index is not None:
+        start_indices = []  # remove items which are too frequent
+        for i, idx in enumerate(sample_index):
+            if (i == 0 or i == len(sample_index) - 1 or
+                    sample_index[i + 1] > start_indices[-1] + n_ctx):
+                start_indices.append(idx)
+    else:
+        start_indices = range(0, len(dataset) - n_ctx, n_ctx)
     return _batch_it(
         (dataset[start_idx: start_idx + n_ctx] for start_idx in tqdm.tqdm(
             start_indices, desc='validation', leave=False)),

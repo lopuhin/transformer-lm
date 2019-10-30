@@ -22,8 +22,8 @@ gpt-2 \
     --batch-size 8 \
     --g-accum-gradients 2 \
     --n-ctx 48 \
-    --n-embed 64 \
-    --n-hidden 32 \
+    --n-embed 32 \
+    --n-hidden 16 \
     --n-head 4 \
     --n-layer 3 \
     --epochs 2 \
@@ -32,16 +32,31 @@ gpt-2 \
     --validate-every 100 \
     --clean
 
-# resume training
+# resume training with slightly adjusted settings
 gpt-2 \
     tests/shakespeare-test-run/ \
     tests/shakespeare-encoded/ \
     tests/shakespeare/sp-model.model \
     --batch-size 8 \
-    --g-accum-gradients 2 \
+    --g-accum-gradients 1 \
     --n-ctx 48 \
-    --n-embed 64 \
-    --n-hidden 32 \
+    --n-embed 32 \
+    --n-hidden 16 \
     --n-head 4 \
     --n-layer 3 \
-    --epochs 2
+    --validate-every 100 \
+    --sample-sentences \
+    --epochs 3
+
+# run only validation
+gpt-2 \
+    tests/shakespeare-test-run/ \
+    tests/shakespeare-encoded/ \
+    tests/shakespeare/sp-model.model \
+    --batch-size 8 \
+    --n-ctx 48 \
+    --n-embed 32 \
+    --n-hidden 16 \
+    --n-head 4 \
+    --n-layer 3 \
+    --only-validate
