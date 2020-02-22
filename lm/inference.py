@@ -134,7 +134,7 @@ class ModelWrapper:
                 return
             word_log_p = sum(lp for lp, _ in current_word)
             output.append((
-                word_log_p + non_continuation_log_p,
+                float(word_log_p + non_continuation_log_p),
                 get_word([t for _, t in current_word])))
             current_word.clear()
 
@@ -149,7 +149,7 @@ class ModelWrapper:
                 # discard punctuation probability as we score only words
                 # (note that log_p is already included in words_log_p)
                 log_p -= words_log_p
-                current_word.append((float(log_p), token))
+                current_word.append((log_p, token))
         finish_current_word()
 
         return output
