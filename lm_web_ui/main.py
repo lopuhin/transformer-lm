@@ -1,6 +1,7 @@
 import argparse
 import base64
 import csv
+import json
 import io
 from pathlib import Path
 from typing import List
@@ -15,6 +16,7 @@ from lm.inference import ModelWrapper
 
 app = web.Application()
 INITIAL_TEXT = 'Она открыла дверь на'
+TITLE = 'Russian Language Model'
 
 
 @aiohttp_jinja2.template('index.jinja2')
@@ -58,6 +60,7 @@ def index(request):
         ctx['occurred_scores_csv'] = to_csv_data_url(
             occurred_scores, ['text_no', unit_name, 'log_prob'])
         ctx['unit_name'] = unit_name
+    ctx['title'] = TITLE
     return ctx
 
 
@@ -78,6 +81,17 @@ def to_csv_data_url(data: List[List], header: List[str]) -> str:
     return f'data:text/csv;base64,{b64data}'
 
 
+@aiohttp_jinja2.template('about.jinja2')
+def about(request):
+    ctx = {}
+    ctx['title'] = TITLE
+    model_params = json.loads(app['model_params'])
+    model_params.pop('argv')  # too long
+    ctx['model_params'] = json.dumps(model_params, indent=4, sort_keys=True)
+    ctx['vocab_size'] = len(app['model'].sp_model)
+    return ctx
+
+
 def main():
     parser = argparse.ArgumentParser()
     arg = parser.add_argument
@@ -90,5 +104,7 @@ def main():
     aiohttp_jinja2.setup(
         app, loader=jinja2.FileSystemLoader(str(template_root)))
     app['model'] = ModelWrapper.load(args.model_root)
+    app['model_params'] = (args.model_root / 'params.json').read_text()
     app.add_routes([web.get('/', index)])
+    app.add_routes([web.get('/about', about)])
     web.run_app(app, host=args.host, port=args.port)

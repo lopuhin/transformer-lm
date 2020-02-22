@@ -27,12 +27,20 @@
             font-size: 100%;
             width: 100%;
         }
+        #about {
+            position: absolute;
+            right: 1em;
+            top: 1em;
+        }
     </style>
 {% endblock %}
 
 {% block body %}
 
-    <h1>Russian Language Model</h1>
+    <h1>{{ title }}</h1>
+
+    <div id="about"><a href="/about">About</a></div>
+
     <form method="GET" action="">
         <div>
             <textarea name="text">{{ text }}</textarea>

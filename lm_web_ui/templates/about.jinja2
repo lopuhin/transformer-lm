@@ -1,0 +1,22 @@
+{% extends "base.jinja2" %}
+
+{% block body %}
+
+<h1>{{ title }}</h1>
+<p>
+    Source code:
+    <a href="https://github.com/lopuhin/transformer-lm">
+        https://github.com/lopuhin/transformer-lm
+    </a>
+</p>
+<p>
+    Vocabulary size: {{ vocab_size }} tokens.<br/>
+    Model parameters:
+    <pre>{{ model_params }}</pre>
+</p>
+
+<p>
+    &copy; Anastasiia Lopukhina, Konstantin Lopukhin
+</p>
+
+{% endblock %}
