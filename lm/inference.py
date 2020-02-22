@@ -126,6 +126,7 @@ class ModelWrapper:
         output: List[Tuple[float, str]] = []
         all_tokens = [self.id_to_token(i) for i in range(len(self.sp_model))]
         continuation_mask = torch.tensor(list(map(is_continuation, all_tokens)))
+        word_mask = torch.tensor(list(map(is_word, all_tokens)))
         current_word = []
 
         def finish_current_word(non_continuation_log_p=0):
@@ -138,13 +139,17 @@ class ModelWrapper:
             current_word.clear()
 
         for idx, token in enumerate(tokens[1:]):
-            log_p = float(log_probs[idx, self.token_to_id(token)])
             if not is_continuation(token):
                 non_continuation_log_p = torch.logsumexp(
                     log_probs[idx, ~continuation_mask], dim=0)
                 finish_current_word(non_continuation_log_p)
             if is_word(token):
-                current_word.append((log_p, token))
+                log_p = log_probs[idx, self.token_to_id(token)]
+                words_log_p = torch.logsumexp(log_probs[idx, word_mask], dim=0)
+                # discard punctuation probability as we score only words
+                # (note that log_p is already included in words_log_p)
+                log_p -= words_log_p
+                current_word.append((float(log_p), token))
         finish_current_word()
 
         return output
