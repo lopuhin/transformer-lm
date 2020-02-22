@@ -3,7 +3,7 @@ import base64
 import csv
 import io
 from pathlib import Path
-from typing import List, Tuple
+from typing import List
 
 import aiohttp_jinja2
 from aiohttp import web
@@ -41,7 +41,7 @@ def index(request):
         for i, t in enumerate(texts, 1):
             occurred_scores.extend(
                 (i, token, log_prob) for log_prob, token in
-                model.get_occurred_log_probs(tokenize(t)))
+                model.get_occurred_word_log_probs(tokenize(t)))
         ctx['occurred_scores'] = occurred_scores
         ctx['occurred_scores_csv'] = to_csv_data_url(
             occurred_scores, ['text_no', 'token', 'log_prob'])

@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import re
 from typing import List, Tuple, Optional, Dict
 
 import sentencepiece as spm
@@ -7,7 +8,7 @@ import torch
 import numpy as np
 
 from .model import Model, HParams
-from .common import END_OF_LINE, END_OF_TEXT
+from .common import END_OF_LINE, END_OF_TEXT, WORD_START
 
 
 class ModelWrapper:
@@ -103,6 +104,51 @@ class ModelWrapper:
             tokens.append(next_token)
 
         return tokens
+
+    def get_occurred_word_log_probs(
+            self, tokens: List[str]) -> List[Tuple[float, str]]:
+        """ Return a list of log probs of occurred words (not tokens!),
+        starting from the second.
+        """
+        def is_word_start(token: str) -> bool:
+            return token.startswith(WORD_START)
+
+        def is_word(token: str) -> bool:
+            return bool(re.search('\w', token))
+
+        def is_continuation(token) -> bool:
+            return is_word(token) and not is_word_start(token)
+
+        def get_word(tokens: List[str]) -> str:
+            return ''.join(t.lstrip(WORD_START) for t in tokens)
+
+        log_probs = self.get_log_probs(tokens)
+        output: List[Tuple[float, str]] = []
+        all_tokens = [self.id_to_token(i) for i in range(len(self.sp_model))]
+        continuation_mask = torch.tensor(list(map(is_continuation, all_tokens)))
+        current_word = []
+
+        def finish_current_word(non_continuation_log_p=0):
+            if not current_word:
+                return
+            word_log_p = sum(lp for lp, _ in current_word)
+            output.append((
+                word_log_p + non_continuation_log_p,
+                get_word([t for _, t in current_word])))
+            current_word.clear()
+
+        for idx, token in enumerate(tokens[1:]):
+            log_p = float(log_probs[idx, self.token_to_id(token)])
+            if not is_continuation(token):
+                non_continuation_log_p = torch.logsumexp(
+                    log_probs[idx, ~continuation_mask], dim=0)
+                finish_current_word(non_continuation_log_p)
+            if is_word(token):
+                current_word.append((log_p, token))
+        finish_current_word()
+
+        return output
+
 
 
 def fixed_state_dict(state_dict):
