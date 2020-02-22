@@ -19,19 +19,32 @@ INITIAL_TEXT = 'Она открыла дверь на'
 
 @aiohttp_jinja2.template('index.jinja2')
 def index(request):
-    text = request.query.get('text', INITIAL_TEXT)
-    lines_as_separate = bool(request.query.get('lines_as_separate'))
+    text = request.query.get('text', '').strip()
+    if text:
+        lines_as_separate = bool(request.query.get('lines_as_separate'))
+    else:
+        # defaults
+        text = INITIAL_TEXT
+        lines_as_separate = True
     ctx = {'text': text, 'lines_as_separate': lines_as_separate}
     model: ModelWrapper = app['model']
 
-    if request.query.get('predict_next_token'):
+    score_words = request.query.get('score_words')
+    score_tokens = request.query.get('score_tokens')
+    if request.query.get('next_token'):
         next_top_k = model.get_next_top_k(tokenize(text), top_k=10)
         next_top_k = [[token, log_prob] for log_prob, token in next_top_k]
         ctx['next_token_prediction'] = next_top_k
         ctx['next_token_prediction_csv'] = to_csv_data_url(
             next_top_k, ['token', 'log_prob'])
 
-    elif request.query.get('score_occurred'):
+    elif score_words or score_tokens:
+        if score_words:
+            scorer = model.get_occurred_word_log_probs
+            unit_name = 'word'
+        else:
+            scorer = model.get_occurred_log_probs
+            unit_name = 'token'
         if lines_as_separate:
             texts = [t.strip() for t in text.split('\n')]
             texts = list(filter(None, texts))
@@ -40,11 +53,11 @@ def index(request):
         occurred_scores = []
         for i, t in enumerate(texts, 1):
             occurred_scores.extend(
-                (i, token, log_prob) for log_prob, token in
-                model.get_occurred_word_log_probs(tokenize(t)))
+                (i, unit, log_prob) for log_prob, unit in scorer(tokenize(t)))
         ctx['occurred_scores'] = occurred_scores
         ctx['occurred_scores_csv'] = to_csv_data_url(
-            occurred_scores, ['text_no', 'token', 'log_prob'])
+            occurred_scores, ['text_no', unit_name, 'log_prob'])
+        ctx['unit_name'] = unit_name
     return ctx
 
 
