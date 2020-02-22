@@ -2,7 +2,13 @@
 
 {% block extra_head %}
     <style>
-        .log-prob-table td:last-child {
+        .log-prob-table th,
+        .log-prob-table td {
+            text-align: left;
+            padding-right: 1em;
+        }
+        .log-prob-table td:last-child,
+        .log-prob-table th:last-child {
             text-align: right;
         }
         .log-prob-table td {
