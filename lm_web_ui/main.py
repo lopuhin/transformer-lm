@@ -34,7 +34,7 @@ def index(request):
     score_words = request.query.get('score_words')
     score_tokens = request.query.get('score_tokens')
     if request.query.get('next_token'):
-        next_top_k = model.get_next_top_k(tokenize(text), top_k=10)
+        next_top_k = model.get_next_top_k(tokenize(text), top_k=20)
         next_top_k = [[token, log_prob] for log_prob, token in next_top_k]
         ctx['next_token_prediction'] = next_top_k
         ctx['next_token_prediction_csv'] = to_csv_data_url(
