@@ -150,6 +150,7 @@ class ModelWrapper:
                 # (note that log_p is already included in words_log_p)
                 log_p -= words_log_p
                 current_word.append((log_p, token))
+        # FIXME don't we need non_continuation_log_p here as well?
         finish_current_word()
 
         return output
