@@ -28,12 +28,16 @@ class ModelWrapper:
         params = json.loads((root / 'params.json').read_text())
         hparams = params['hparams']
         hparams.setdefault('n_hidden', hparams['n_embed'])
-        model = Model(HParams(**hparams))
-        state = torch.load(root / 'model.pt', map_location='cpu')
-        state_dict = fixed_state_dict(state['state_dict'])
-        model.load_state_dict(state_dict)
-        if 'seen_tokens' in state:
-            params['seen_tokens'] = state['seen_tokens']
+        pkl_path = root / 'model.pkl'
+        if pkl_path.exists():
+            model = torch.load(pkl_path, map_location='cpu')
+        else:
+            model = Model(HParams(**hparams))
+            state = torch.load(root / 'model.pt', map_location='cpu')
+            state_dict = fixed_state_dict(state['state_dict'])
+            model.load_state_dict(state_dict)
+            if 'seen_tokens' in state:
+                params['seen_tokens'] = state['seen_tokens']
         return cls(model, sp_model, params=params)
 
     def tokenize(self, s: str) -> List[str]:
