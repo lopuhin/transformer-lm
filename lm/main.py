@@ -32,6 +32,7 @@ def main(
         batch_size=2,  # per GPU
         g_accum_gradients=None,  # accumulate gradients N times (globally)
         gradient_checkpointing=False, # saves GPU memory
+        warmup_steps=0,
         n_ctx=1024,
         n_embed=768,
         n_head=12,
@@ -103,6 +104,7 @@ def main(
         batch_size=batch_size,
         g_accum_gradients=g_accum_gradients,
         use_amp=use_amp,
+        warmup_steps=warmup_steps,
     )
     params_s = json.dumps(params, indent=4, sort_keys=True, ensure_ascii=False)
     if is_main:
@@ -150,8 +152,13 @@ def main(
             torch.load(optimizer_path, map_location=device))
         print(f'Resuming from seen_tokens {seen_tokens:,}')
 
-    if model_path.exists():
-        load_model()
+    def get_lr(_):
+        step = seen_tokens // step_tokens
+        if step >= warmup_steps:
+            return 1.0
+        return step / warmup_steps
+
+    scheduler = optim.lr_scheduler.LambdaLR(optimizer, get_lr)
 
     if device_id is not None:
         print(f'device {device} initializing process group')
@@ -195,6 +202,7 @@ def main(
             del loss
         scaler.step(optimizer)
         scaler.update()
+        scheduler.step()
 
     def train():
         nonlocal seen_tokens
