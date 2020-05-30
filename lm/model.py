@@ -204,8 +204,9 @@ class Conv1D(nn.Linear):
         nn.init.zeros_(self.bias)
 
 
-def gelu(x, c=math.sqrt(2 / math.pi)):
-    return 0.5 * x * (1 + torch.tanh(c * (x + 0.044715 * torch.pow(x, 3))))
+@torch.jit.script
+def gelu(x):
+    return 0.5 * x * (1 + torch.tanh(math.sqrt(2 / math.pi) * (x + 0.044715 * torch.pow(x, 3))))
 
 
 def position_for(batch_size, n_steps, past_length, device=None):
