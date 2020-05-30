@@ -20,9 +20,10 @@ Documentation below is for PyTorch version.
 Installation
 ------------
 
-Python 3.6+ is required. Working in a virtualenv is assumed below.
+Python 3.6+ is required with torch nightly or 1.6.0+.
+Working in a virtualenv is assumed below.
 `Install <https://pytorch.org/get-started/locally/>`__
-appropriate version of pytorch first (e.g. ``pip install torch``), and then::
+appropriate version of pytorch first, and then::
 
     pip install -r requirements.txt
     python setup.py develop

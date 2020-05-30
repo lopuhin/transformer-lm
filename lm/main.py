@@ -43,7 +43,7 @@ def main(
         validate_every=None,  # same as save_every by default
         only_validate=False,
         max_tokens=None,
-        opt_level=None,  # apex.amp opt level (e.g. "O1")
+        use_amp=False,
         # train on contexts starting from sentence start
         sample_sentences=False,
         verbose=False,  # print all training contexts
@@ -102,6 +102,7 @@ def main(
         lr=lr,
         batch_size=batch_size,
         g_accum_gradients=g_accum_gradients,
+        use_amp=use_amp,
     )
     params_s = json.dumps(params, indent=4, sort_keys=True, ensure_ascii=False)
     if is_main:
@@ -130,19 +131,13 @@ def main(
     model = Model(hparams).to(device)
     cross_entropy = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
+    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
     loss_meter = AverageMeter()
     cudnn.benchmark = True
-    if opt_level:
-        from apex import amp
-        model, optimizer = amp.initialize(
-            model, optimizer, opt_level=opt_level)
 
     seen_tokens = 0
 
-    def load_model():
-        """ Load model, update seen_tokens value
-        """
-        nonlocal seen_tokens
+    if model_path.exists():
         state = torch.load(model_path, map_location=device)
         if 'seen_tokens' in state:
             seen_tokens = state['seen_tokens']
@@ -150,6 +145,7 @@ def main(
             seen_tokens = state['step'] * step_tokens
         state_dict = fixed_state_dict(state['state_dict'])
         model.load_state_dict(state_dict)
+        del state_dict
         optimizer.load_state_dict(
             torch.load(optimizer_path, map_location=device))
         print(f'Resuming from seen_tokens {seen_tokens:,}')
@@ -190,16 +186,15 @@ def main(
         loss_scale = n_ctx * batch_size * accum_gradients / (512 * 4 * 32)
         for ctx in torch.split(context, batch_size):
             ctx = ctx.to(device=device)
-            logits = model(ctx)['logits']
-            loss = loss_fn(logits, ctx)
-            loss_b = loss * loss_scale
-            if opt_level:
-                with amp.scale_loss(loss_b, optimizer) as scaled_loss:
-                    scaled_loss.backward()
-            else:
-                loss_b.backward()
+            with torch.cuda.amp.autocast(enabled=use_amp):
+                logits = model(ctx)['logits']
+                loss = loss_fn(logits, ctx)
+                loss_b = loss * loss_scale
+            scaler.scale(loss_b).backward()
             loss_meter.update(float(loss.item()))
-        optimizer.step()
+            del loss
+        scaler.step(optimizer)
+        scaler.update()
 
     def train():
         nonlocal seen_tokens
