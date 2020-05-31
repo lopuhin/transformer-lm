@@ -23,6 +23,7 @@ import sentencepiece as spm
 from .fire_utils import only_allow_defined_args, get_defined_args
 from .model import Model, HParams
 from .inference import fixed_state_dict
+from .common import END_OF_LINE, END_OF_TEXT
 
 
 def main(
@@ -123,7 +124,7 @@ def main(
 
     if sample_sentences:
         train_sample_index, valid_sample_index = [
-            _sentense_sample_index(dataset, n_ctx, sp_model)
+            _sentence_sample_index(dataset, n_ctx, sp_model)
             for dataset in [train_dataset, valid_dataset]]
     else:
         train_sample_index = valid_sample_index = None
@@ -314,10 +315,11 @@ def main(
                 sys.exit(1)
 
 
-def _sentense_sample_index(dataset: np.ndarray, n_ctx: int, sp_model):
+def _sentence_sample_index(dataset: np.ndarray, n_ctx: int, sp_model):
     # a very very dumb implementation for a start
-    period_id = sp_model.piece_to_id('.')
-    sample_index = np.nonzero(dataset == period_id)[0] + 1
+    ids = np.array([sp_model.piece_to_id(x) for x in ['.', END_OF_LINE, END_OF_TEXT]])
+    sample_index = np.nonzero(np.isin(dataset, ids))[0] + 1
+    print(f'{len(sample_index):,} "sentences" found for sampling')
     return np.clip(sample_index, 0, len(dataset) - n_ctx - 1)
 
 
