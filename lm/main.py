@@ -1,10 +1,12 @@
+from collections import defaultdict
 import json
+import math
 import os
 from pathlib import Path
 import statistics
 import shutil
 import sys
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 import attr
 import fire
@@ -131,10 +133,10 @@ def main(
     else:
         device = torch.device('cpu')
     model = Model(hparams).to(device)
-    cross_entropy = nn.CrossEntropyLoss()
+    cross_entropy = nn.CrossEntropyLoss(reduction='none')
     optimizer = optim.Adam(model.parameters(), lr=lr)
     scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
-    loss_meter = AverageMeter()
+    loss_meters = defaultdict(AverageMeter)
     cudnn.benchmark = True
 
     seen_tokens = 0
@@ -171,9 +173,15 @@ def main(
         print(f'process group for {device} initialized')
 
     def loss_fn(logits, ctx):
-        return cross_entropy(
-            input=logits[:, :-1].reshape([-1, logits.shape[-1]]),
-            target=ctx[:, 1:].reshape(-1))
+        loss = cross_entropy(input=logits[:, :-1].transpose(2, 1),
+                             target=ctx[:, 1:])
+        mean_loss = loss.mean()
+        loss_metrics = {'loss': float(mean_loss.item())}
+        for power in range(3, 1 + int(math.log2(loss.shape[1]))):
+            limit = 2**power
+            if limit < loss.shape[1]:
+                loss_metrics[f'loss_{limit}'] = float(loss[:, :limit].mean().item())
+        return mean_loss, loss_metrics
 
     def train_step():
         """ Train step on one GPU.
@@ -195,10 +203,11 @@ def main(
             ctx = ctx.to(device=device)
             with torch.cuda.amp.autocast(enabled=use_amp):
                 logits = model(ctx)['logits']
-                loss = loss_fn(logits, ctx)
+                loss, loss_metrics = loss_fn(logits, ctx)
                 loss_b = loss * loss_scale
             scaler.scale(loss_b).backward()
-            loss_meter.update(float(loss.item()))
+            for name, value in loss_metrics.items():
+                loss_meters[name].update(value)
             del loss
         scaler.step(optimizer)
         scaler.update()
@@ -228,14 +237,17 @@ def main(
             step += 1
             epoch_pbar.update(step_tokens)
             epoch_pbar.set_description(f'epoch {1 + seen_tokens // epoch_size}')
-            epoch_pbar.set_postfix(loss=f'{loss_meter.mean():.2f}')
+            epoch_pbar.set_postfix(loss=f'{loss_meters["loss"].mean():.2f}')
             epoch_pbar.refresh()
             if step % save_every == 0:
                 save()
             if is_main and step % log_every == 0:
-                json_log_plots.write_event(run_path, step=seen_tokens,
-                                           loss=loss_meter.mean())
-                loss_meter.reset()
+                json_log_plots.write_event(
+                    run_path, step=seen_tokens,
+                    **{name: meter.mean()
+                       for name, meter in loss_meters.items()})
+                for meter in loss_meters.values():
+                    meter.reset()
             if step % validate_every == 0:
                 validate()
             if seen_tokens % epoch_size == 0:
@@ -250,14 +262,14 @@ def main(
         if not is_main or world_size != 1:
             return
         json_log_plots.write_event(run_path, step=seen_tokens,
-                                   valid_loss=get_valid_loss())
+                                   **get_valid_losses())
 
-    def get_valid_loss():
-        """ Run validation, return mean loss. This is a pessimistic score,
+    def get_valid_losses() -> Dict[str, float]:
+        """ Run validation, return losses. This is a pessimistic score,
         as validation contexts are non-overlapping.
         """
         model.eval()
-        losses = AverageMeter()
+        losses = defaultdict(AverageMeter)
         with torch.no_grad():
             for ctx in _valid_batch_iter(
                     valid_dataset, batch_size=batch_size, n_ctx=n_ctx,
@@ -266,10 +278,11 @@ def main(
                     continue
                 ctx = torch.LongTensor(ctx).to(device)
                 logits = model(ctx)['logits']
-                loss = loss_fn(logits, ctx)
-                losses.update(float(loss.item()))
+                _, loss_metrics = loss_fn(logits, ctx)
+                for k, v in loss_metrics.items():
+                    losses[k].update(v)
         model.train()
-        return losses.mean()
+        return {k: v.mean() for k, v in losses.items()}
 
     def save():
         if not is_main:
@@ -288,7 +301,9 @@ def main(
             print('multi-GPU validation is not supported yet')
             sys.exit(1)
         if is_main:
-            print(f'Validation loss: {get_valid_loss():.4f}')
+            valid_losses = get_valid_losses()
+            for k, v in sorted(valid_losses.items()):
+                print(f'{k:<20} {v:.4f}')
     else:
         try:
             train()
