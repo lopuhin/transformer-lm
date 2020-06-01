@@ -37,6 +37,7 @@ def main(
         gradient_checkpointing=False, # saves GPU memory
         warmup_steps=0,
         n_ctx=1024,
+        n_ctx_min=None,  # dynamic split of context during training
         n_embed=768,
         n_head=12,
         n_layer=12,
@@ -113,6 +114,10 @@ def main(
     if is_main:
         print(params_s)
         (run_path / 'params.json').write_text(params_s, encoding='utf8')
+
+    if n_ctx_min:
+        assert n_ctx % n_ctx_min == 0
+        assert n_ctx == 2 ** int(math.log2(n_ctx))
 
     dataset_path = Path(dataset_path)
     print(f'Loading dataset from {dataset_path}')
@@ -201,6 +206,13 @@ def main(
         optimizer.zero_grad()
         loss_scale = n_ctx * batch_size * accum_gradients / (512 * 4 * 32)
         for ctx in torch.split(context, batch_size):
+            if n_ctx_min and np.random.random() < 0.5:
+                assert n_ctx % n_ctx_min == 0
+                assert n_ctx == 2**int(math.log2(n_ctx))
+                ctx_size = np.random.choice([
+                    n_ctx_min * 2**i
+                    for i in range(0, int(math.log2(n_ctx / n_ctx_min)))])
+                ctx = torch.cat(torch.split(ctx, int(ctx_size), 1))
             ctx = ctx.to(device=device)
             with torch.cuda.amp.autocast(enabled=use_amp):
                 logits = model(ctx)['logits']
