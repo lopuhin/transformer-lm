@@ -35,7 +35,9 @@ def index(request):
     score_words = request.query.get('score_words')
     score_tokens = request.query.get('score_tokens')
     if request.query.get('next_token'):
-        handle_next_token(model, ctx, text)
+        handle_token_prediction(model, ctx, text)
+    elif request.query.get('generate_text'):
+        handle_text_generation(model, ctx, text)
     elif score_words or score_tokens:
         handle_scoring(
             model, ctx, text,
@@ -44,12 +46,20 @@ def index(request):
     return ctx
 
 
-def handle_next_token(model, ctx, text):
+def handle_token_prediction(model, ctx, text):
     next_top_k = model.get_next_top_k(tokenize(text), top_k=20)
     next_top_k = [[token, log_prob] for log_prob, token in next_top_k]
     ctx['next_token_prediction'] = next_top_k
     ctx['next_token_prediction_csv'] = to_csv_data_url(
         next_top_k, ['token', 'log_prob'])
+
+
+def handle_text_generation(model, ctx, text):
+    tokens = model.generate_tokens(
+        tokenize(text), tokens_to_generate=20, top_k=20)
+    ctx['generated_text'] = model.sp_model.decode_pieces(tokens)
+    print(tokens)
+    # TODO paragraphs
 
 
 def handle_scoring(

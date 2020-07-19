@@ -90,7 +90,9 @@ class ModelWrapper:
             tokens_to_generate: int,
             top_k: int,
             ) -> List[str]:
+        # TODO do efficient generation
         tokens = list(tokens_prefix)
+        output_tokens = []
 
         for i in range(tokens_to_generate):
 
@@ -106,8 +108,9 @@ class ModelWrapper:
             next_token = ntk[next_token_n][1]
             
             tokens.append(next_token)
+            output_tokens.append(next_token)
 
-        return tokens
+        return output_tokens
 
     def get_occurred_word_log_probs(
             self, tokens: List[str]) -> List[Tuple[float, str]]:
@@ -158,7 +161,6 @@ class ModelWrapper:
         finish_current_word()
 
         return output
-
 
 
 def fixed_state_dict(state_dict):
