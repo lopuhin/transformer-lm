@@ -50,12 +50,11 @@ class Model(nn.Module):
         # Transformer
         presents = []
         for i, block in enumerate(self.blocks):
+            args = (h, past[:, i] if past is not None else None)
             if self.hparams.gradient_checkpointing:
-                h, present = torch.utils.checkpoint.checkpoint(
-                    block, h, past[:, i] if past is not None else None)
+                h, present = torch.utils.checkpoint.checkpoint(block, *args)
             else:
-                h, present = block(
-                    h, past=past[:, i] if past is not None else None)
+                h, present = block(*args)
             presents.append(present)
         h = self.ln_f(h)
         if self.out_proj:
