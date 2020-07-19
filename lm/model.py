@@ -64,7 +64,7 @@ class Model(nn.Module):
         logits = torch.matmul(h_flat, self.wte.weight.t())
         logits = logits.reshape([batch_size, n_ctx, self.hparams.n_vocab])
         return {
-            'presents': torch.stack(tuple(presents), dim=1),
+            'presents': torch.stack(presents, dim=1),
             'logits': logits,
         }
 
@@ -129,8 +129,7 @@ class Attention(nn.Module):
         assert x.shape[-1] == self.hparams.n_hidden
         if past is not None:
             # Should be [batch, 2, heads, sequence, features], where 2 is [k, v]
-            assert len(past.shape) == 5
-            assert past.shape[-1] == self.hparams.n_hidden
+            assert len(past.shape) == 5, past.shape
         c = self.c_attn(x)
         q, k, v = map(self.split_heads, torch.split(c, x.shape[-1], dim=2))
         present = torch.stack([k, v], dim=1)
