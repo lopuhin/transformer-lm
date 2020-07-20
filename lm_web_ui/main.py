@@ -56,7 +56,7 @@ def handle_token_prediction(model, ctx, text):
 
 def handle_text_generation(model, ctx, text):
     tokens = model.generate_tokens(
-        tokenize(text), tokens_to_generate=20, top_k=20)
+        tokenize(text), tokens_to_generate=50, top_k=20)
     ctx['generated_text'] = model.sp_model.decode_pieces(tokens)
     # TODO paragraphs
 
