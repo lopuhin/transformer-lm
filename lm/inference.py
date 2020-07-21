@@ -101,11 +101,36 @@ class ModelWrapper:
             reverse=True)
         return result, presents
 
+    def get_top_p_logits(
+            self, tokens: List[str], top_p: float) -> torch.Tensor:
+        """Return a list top top-p (by nucleus sampling) of prob and token,
+        for what would come after the last token.
+        """
+        return self._get_top_p_logits(tokens, top_p, past=None)[0]
+
+    def _get_top_p_logits(
+            self, tokens: List[str], top_p: float, past: Optional[torch.Tensor],
+            ) -> Tuple[torch.Tensor, torch.Tensor]:
+        next_log_probs, presents = self._get_log_probs(tokens, past=past)
+        next_log_probs = next_log_probs[-1]
+        sorted_log_probs, sorted_indices = \
+            torch.sort(next_log_probs, descending=True)
+        cumulative_probs = torch.cumsum(
+            torch.nn.functional.softmax(sorted_log_probs, dim=-1), dim=-1)
+        sorted_indices_to_remove = cumulative_probs > top_p
+        sorted_indices_to_remove[1:] = sorted_indices_to_remove[:-1].clone()
+        sorted_indices_to_remove[0] = False
+        indices_to_remove = sorted_indices_to_remove.scatter(
+            dim=0, index=sorted_indices, src=sorted_indices_to_remove)
+        next_log_probs[indices_to_remove] = -float('Inf')
+        return next_log_probs, presents
+
     def generate_tokens(
             self,
             tokens_prefix: List[str],
             tokens_to_generate: int,
             top_k: int,
+            top_p: float = 0.0,
             ) -> List[str]:
         tokens = list(tokens_prefix)
         output_tokens = []
@@ -113,21 +138,29 @@ class ModelWrapper:
 
         for i in range(tokens_to_generate):
 
-            # generate TOP_K potential next tokens
-            ntk, presents = self._get_next_top_k(tokens, top_k, past=past)
+            if top_p <= 0.0:
+                # generate TOP_K potential next tokens
+                ntk, presents = self._get_next_top_k(tokens, top_k, past=past)
+
+                # convert log probs to real probs
+                logprobs = np.array(list(map(lambda a: a[0], ntk)))
+                probs = np.exp(logprobs) / np.exp(logprobs).sum()
+
+                # pick next token randomly according to probs distribution
+                next_token_n = np.random.choice(top_k, p=probs)
+                next_token = ntk[next_token_n][1]
+            else:
+                filtered_logits, presents = \
+                    self._get_top_p_logits(tokens, top_p, past=past)
+                next_token_n = torch.multinomial(torch.nn.functional.softmax(
+                    filtered_logits, dim=-1), num_samples=1)
+                next_token = self.id_to_token(next_token_n)
+
             if past is None:
                 past = presents
             else:
                 past = torch.cat([past, presents], dim=-2)
 
-            # convert log probs to real probs
-            logprobs = np.array(list(map(lambda a: a[0], ntk)))
-            probs = np.exp(logprobs) / np.exp(logprobs).sum()
-
-            # pick next token randomly according to probs distribution
-            next_token_n = np.random.choice(top_k, p=probs)
-            next_token = ntk[next_token_n][1]
-            
             tokens = [next_token]
             output_tokens.append(next_token)
 
