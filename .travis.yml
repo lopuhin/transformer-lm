@@ -3,7 +3,7 @@ python:
   - "3.6"
 install:
   - pip install -q pytest
-  - pip install -q https://download.pytorch.org/whl/cpu/torch-1.0.1.post2-cp36-cp36m-linux_x86_64.whl
+  - pip install -q --pre torch==1.6.0.dev20200528 -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
   - pip install -q -r requirements.txt
   - python setup.py develop
 script:

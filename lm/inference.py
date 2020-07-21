@@ -56,12 +56,19 @@ class ModelWrapper:
         model.get_log_probs([model.END_OF_TEXT] + tokens).
         Use model.tokenize to obtain tokens.
         """
-        assert len(tokens) <= self.model.hparams.n_ctx  # TODO
+        return self._get_log_probs(tokens, past=None)[0]
+
+    def _get_log_probs(
+            self, tokens: List[str], past: Optional[torch.Tensor],
+            ) -> Tuple[torch.Tensor, torch.Tensor]:
+        if len(tokens) > self.model.hparams.n_ctx:
+            raise ValueError
         ids = [self.token_to_id(t) for t in tokens]
         ctx = torch.LongTensor(ids).unsqueeze(0)
         with torch.no_grad():
-            logits = self.model(ctx)['logits'].squeeze(0)
-            return torch.log_softmax(logits, dim=1)
+            output = self.model(ctx, past=past)
+            logits = output['logits'].squeeze(0)
+            return torch.log_softmax(logits, dim=1), output['presents']
 
     def get_occurred_log_probs(
             self, tokens: List[str]) -> List[Tuple[float, str]]:
@@ -75,44 +82,65 @@ class ModelWrapper:
         return out
 
     def get_next_top_k(
-            self, tokens: List[str], top_k: int) -> List[Tuple[float, str]]:
+            self, tokens: List[str], top_k: int,
+            ) -> List[Tuple[float, str]]:
         """ Return a list of top k tuples of log prob and token,
         for what would come after the last token.
         """
-        next_log_probs = self.get_log_probs(tokens)[-1]
-        return sorted([(float(next_log_probs[i]), self.id_to_token(i))
-                       for i in next_log_probs.argsort()[-top_k:]],
-                      reverse=True)
+        return self._get_next_top_k(tokens, top_k, past=None)[0]
+
+    def _get_next_top_k(
+            self, tokens: List[str], top_k: int,
+            past: Optional[torch.Tensor],
+            ) -> Tuple[List[Tuple[float, str]], torch.Tensor]:
+        next_log_probs, presents = self._get_log_probs(tokens, past=past)
+        next_log_probs = next_log_probs[-1]
+        result = sorted(
+            [(float(next_log_probs[i]), self.id_to_token(i))
+             for i in next_log_probs.argsort()[-top_k:]],
+            reverse=True)
+        return result, presents
 
     def get_top_p_logits(
-        self, tokens: List[str], top_p: float) -> torch.tensor:
+            self, tokens: List[str], top_p: float) -> torch.Tensor:
         """Return a list top top-p (by nucleus sampling) of prob and token,
         for what would come after the last token.
         """
-        next_log_probs = self.get_log_probs(tokens)[-1]
-        sorted_log_probs, sorted_indices = torch.sort(next_log_probs, descending=True)
-        cumulative_probs = torch.cumsum(torch.nn.functional.softmax(sorted_log_probs, dim=-1), dim=-1)
+        return self._get_top_p_logits(tokens, top_p, past=None)[0]
+
+    def _get_top_p_logits(
+            self, tokens: List[str], top_p: float, past: Optional[torch.Tensor],
+            ) -> Tuple[torch.Tensor, torch.Tensor]:
+        next_log_probs, presents = self._get_log_probs(tokens, past=past)
+        next_log_probs = next_log_probs[-1]
+        sorted_log_probs, sorted_indices = \
+            torch.sort(next_log_probs, descending=True)
+        cumulative_probs = torch.cumsum(
+            torch.nn.functional.softmax(sorted_log_probs, dim=-1), dim=-1)
         sorted_indices_to_remove = cumulative_probs > top_p
         sorted_indices_to_remove[1:] = sorted_indices_to_remove[:-1].clone()
         sorted_indices_to_remove[0] = False
-        indices_to_remove = sorted_indices_to_remove.scatter(dim=0, index=sorted_indices, src=sorted_indices_to_remove)
+        indices_to_remove = sorted_indices_to_remove.scatter(
+            dim=0, index=sorted_indices, src=sorted_indices_to_remove)
         next_log_probs[indices_to_remove] = -float('Inf')
-        return next_log_probs
+        return next_log_probs, presents
 
     def generate_tokens(
             self,
             tokens_prefix: List[str],
             tokens_to_generate: int,
             top_k: int,
-            top_p: float,
+            top_p: float = 0.0,
             ) -> List[str]:
         tokens = list(tokens_prefix)
+        output_tokens = []
+        past = None
 
         for i in range(tokens_to_generate):
 
             if top_p <= 0.0:
                 # generate TOP_K potential next tokens
-                ntk = self.get_next_top_k(tokens, top_k)
+                ntk, presents = self._get_next_top_k(tokens, top_k, past=past)
 
                 # convert log probs to real probs
                 logprobs = np.array(list(map(lambda a: a[0], ntk)))
@@ -122,14 +150,21 @@ class ModelWrapper:
                 next_token_n = np.random.choice(top_k, p=probs)
                 next_token = ntk[next_token_n][1]
             else:
-                filtered_logits = self.get_top_p_logits(tokens, top_p)
+                filtered_logits, presents = \
+                    self._get_top_p_logits(tokens, top_p, past=past)
                 next_token_n = torch.multinomial(torch.nn.functional.softmax(
                     filtered_logits, dim=-1), num_samples=1)
                 next_token = self.id_to_token(next_token_n)
-            
-            tokens.append(next_token)
 
-        return tokens
+            if past is None:
+                past = presents
+            else:
+                past = torch.cat([past, presents], dim=-2)
+
+            tokens = [next_token]
+            output_tokens.append(next_token)
+
+        return output_tokens
 
     def get_occurred_word_log_probs(
             self, tokens: List[str]) -> List[Tuple[float, str]]:
@@ -180,7 +215,6 @@ class ModelWrapper:
         finish_current_word()
 
         return output
-
 
 
 def fixed_state_dict(state_dict):

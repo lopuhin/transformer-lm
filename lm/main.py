@@ -1,10 +1,12 @@
+from collections import defaultdict
 import json
+import math
 import os
 from pathlib import Path
 import statistics
 import shutil
 import sys
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 import attr
 import fire
@@ -21,6 +23,7 @@ import sentencepiece as spm
 from .fire_utils import only_allow_defined_args, get_defined_args
 from .model import Model, HParams
 from .inference import fixed_state_dict
+from .common import END_OF_LINE, END_OF_TEXT
 
 
 def main(
@@ -32,7 +35,9 @@ def main(
         batch_size=2,  # per GPU
         g_accum_gradients=None,  # accumulate gradients N times (globally)
         gradient_checkpointing=False, # saves GPU memory
+        warmup_steps=0,
         n_ctx=1024,
+        n_ctx_min=None,  # dynamic split of context during training
         n_embed=768,
         n_head=12,
         n_layer=12,
@@ -43,7 +48,7 @@ def main(
         validate_every=None,  # same as save_every by default
         only_validate=False,
         max_tokens=None,
-        opt_level=None,  # apex.amp opt level (e.g. "O1")
+        use_amp=False,
         # train on contexts starting from sentence start
         sample_sentences=False,
         verbose=False,  # print all training contexts
@@ -102,11 +107,17 @@ def main(
         lr=lr,
         batch_size=batch_size,
         g_accum_gradients=g_accum_gradients,
+        use_amp=use_amp,
+        warmup_steps=warmup_steps,
     )
     params_s = json.dumps(params, indent=4, sort_keys=True, ensure_ascii=False)
     if is_main:
         print(params_s)
         (run_path / 'params.json').write_text(params_s, encoding='utf8')
+
+    if n_ctx_min:
+        assert n_ctx % n_ctx_min == 0
+        assert n_ctx == 2 ** int(math.log2(n_ctx))
 
     dataset_path = Path(dataset_path)
     print(f'Loading dataset from {dataset_path}')
@@ -118,7 +129,7 @@ def main(
 
     if sample_sentences:
         train_sample_index, valid_sample_index = [
-            _sentense_sample_index(dataset, n_ctx, sp_model)
+            _sentence_sample_index(dataset, n_ctx, sp_model)
             for dataset in [train_dataset, valid_dataset]]
     else:
         train_sample_index = valid_sample_index = None
@@ -128,21 +139,15 @@ def main(
     else:
         device = torch.device('cpu')
     model = Model(hparams).to(device)
-    cross_entropy = nn.CrossEntropyLoss()
+    cross_entropy = nn.CrossEntropyLoss(reduction='none')
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    loss_meter = AverageMeter()
+    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+    loss_meters = defaultdict(AverageMeter)
     cudnn.benchmark = True
-    if opt_level:
-        from apex import amp
-        model, optimizer = amp.initialize(
-            model, optimizer, opt_level=opt_level)
 
     seen_tokens = 0
 
-    def load_model():
-        """ Load model, update seen_tokens value
-        """
-        nonlocal seen_tokens
+    if model_path.exists():
         state = torch.load(model_path, map_location=device)
         if 'seen_tokens' in state:
             seen_tokens = state['seen_tokens']
@@ -150,12 +155,18 @@ def main(
             seen_tokens = state['step'] * step_tokens
         state_dict = fixed_state_dict(state['state_dict'])
         model.load_state_dict(state_dict)
+        del state_dict
         optimizer.load_state_dict(
             torch.load(optimizer_path, map_location=device))
         print(f'Resuming from seen_tokens {seen_tokens:,}')
 
-    if model_path.exists():
-        load_model()
+    def get_lr(_):
+        step = seen_tokens // step_tokens
+        if step >= warmup_steps:
+            return 1.0
+        return step / warmup_steps
+
+    scheduler = optim.lr_scheduler.LambdaLR(optimizer, get_lr)
 
     if device_id is not None:
         print(f'device {device} initializing process group')
@@ -168,9 +179,15 @@ def main(
         print(f'process group for {device} initialized')
 
     def loss_fn(logits, ctx):
-        return cross_entropy(
-            input=logits[:, :-1].reshape([-1, logits.shape[-1]]),
-            target=ctx[:, 1:].reshape(-1))
+        loss = cross_entropy(input=logits[:, :-1].transpose(2, 1),
+                             target=ctx[:, 1:])
+        mean_loss = loss.mean()
+        loss_metrics = {'loss': float(mean_loss.item())}
+        for power in range(3, 1 + int(math.log2(loss.shape[1]))):
+            limit = 2**power
+            if limit < loss.shape[1]:
+                loss_metrics[f'loss_{limit}'] = float(loss[:, :limit].mean().item())
+        return mean_loss, loss_metrics
 
     def train_step():
         """ Train step on one GPU.
@@ -189,17 +206,25 @@ def main(
         optimizer.zero_grad()
         loss_scale = n_ctx * batch_size * accum_gradients / (512 * 4 * 32)
         for ctx in torch.split(context, batch_size):
+            if n_ctx_min and np.random.random() < 0.5:
+                assert n_ctx % n_ctx_min == 0
+                assert n_ctx == 2**int(math.log2(n_ctx))
+                ctx_size = np.random.choice([
+                    n_ctx_min * 2**i
+                    for i in range(0, int(math.log2(n_ctx / n_ctx_min)))])
+                ctx = torch.cat(torch.split(ctx, int(ctx_size), 1))
             ctx = ctx.to(device=device)
-            logits = model(ctx)['logits']
-            loss = loss_fn(logits, ctx)
-            loss_b = loss * loss_scale
-            if opt_level:
-                with amp.scale_loss(loss_b, optimizer) as scaled_loss:
-                    scaled_loss.backward()
-            else:
-                loss_b.backward()
-            loss_meter.update(float(loss.item()))
-        optimizer.step()
+            with torch.cuda.amp.autocast(enabled=use_amp):
+                logits = model(ctx)['logits']
+                loss, loss_metrics = loss_fn(logits, ctx)
+                loss_b = loss * loss_scale
+            scaler.scale(loss_b).backward()
+            for name, value in loss_metrics.items():
+                loss_meters[name].update(value)
+            del loss
+        scaler.step(optimizer)
+        scaler.update()
+        scheduler.step()
 
     def train():
         nonlocal seen_tokens
@@ -225,14 +250,17 @@ def main(
             step += 1
             epoch_pbar.update(step_tokens)
             epoch_pbar.set_description(f'epoch {1 + seen_tokens // epoch_size}')
-            epoch_pbar.set_postfix(loss=f'{loss_meter.mean():.2f}')
+            epoch_pbar.set_postfix(loss=f'{loss_meters["loss"].mean():.2f}')
             epoch_pbar.refresh()
             if step % save_every == 0:
                 save()
             if is_main and step % log_every == 0:
-                json_log_plots.write_event(run_path, step=seen_tokens,
-                                           loss=loss_meter.mean())
-                loss_meter.reset()
+                json_log_plots.write_event(
+                    run_path, step=seen_tokens,
+                    **{name: meter.mean()
+                       for name, meter in loss_meters.items()})
+                for meter in loss_meters.values():
+                    meter.reset()
             if step % validate_every == 0:
                 validate()
             if seen_tokens % epoch_size == 0:
@@ -247,14 +275,14 @@ def main(
         if not is_main or world_size != 1:
             return
         json_log_plots.write_event(run_path, step=seen_tokens,
-                                   valid_loss=get_valid_loss())
+                                   **get_valid_losses())
 
-    def get_valid_loss():
-        """ Run validation, return mean loss. This is a pessimistic score,
+    def get_valid_losses() -> Dict[str, float]:
+        """ Run validation, return losses. This is a pessimistic score,
         as validation contexts are non-overlapping.
         """
         model.eval()
-        losses = AverageMeter()
+        losses = defaultdict(AverageMeter)
         with torch.no_grad():
             for ctx in _valid_batch_iter(
                     valid_dataset, batch_size=batch_size, n_ctx=n_ctx,
@@ -263,10 +291,11 @@ def main(
                     continue
                 ctx = torch.LongTensor(ctx).to(device)
                 logits = model(ctx)['logits']
-                loss = loss_fn(logits, ctx)
-                losses.update(float(loss.item()))
+                _, loss_metrics = loss_fn(logits, ctx)
+                for k, v in loss_metrics.items():
+                    losses[k].update(v)
         model.train()
-        return losses.mean()
+        return {k: v.mean() for k, v in losses.items()}
 
     def save():
         if not is_main:
@@ -285,7 +314,9 @@ def main(
             print('multi-GPU validation is not supported yet')
             sys.exit(1)
         if is_main:
-            print(f'Validation loss: {get_valid_loss():.4f}')
+            valid_losses = get_valid_losses()
+            for k, v in sorted(valid_losses.items()):
+                print(f'{k:<20} {v:.4f}')
     else:
         try:
             train()
@@ -296,10 +327,11 @@ def main(
                 sys.exit(1)
 
 
-def _sentense_sample_index(dataset: np.ndarray, n_ctx: int, sp_model):
+def _sentence_sample_index(dataset: np.ndarray, n_ctx: int, sp_model):
     # a very very dumb implementation for a start
-    period_id = sp_model.piece_to_id('.')
-    sample_index = np.nonzero(dataset == period_id)[0] + 1
+    ids = np.array([sp_model.piece_to_id(x) for x in ['.', END_OF_LINE, END_OF_TEXT]])
+    sample_index = np.nonzero(np.isin(dataset, ids))[0] + 1
+    print(f'{len(sample_index):,} "sentences" found for sampling')
     return np.clip(sample_index, 0, len(dataset) - n_ctx - 1)
 
 
