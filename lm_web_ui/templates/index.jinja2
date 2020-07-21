@@ -32,6 +32,12 @@
             right: 1em;
             top: 1em;
         }
+        div.buttons {
+            margin-bottom: 1em;
+        }
+        .query-text {
+            font-weight: bold;
+        }
     </style>
 {% endblock %}
 
@@ -45,20 +51,26 @@
         <div>
             <textarea name="text">{{ text }}</textarea>
         </div>
-        <div>
+        <div class="buttons">
             <input type="submit" name="score_words"
                    value="Score words"
                    style="margin-left: 0"/>
             <input type="submit" name="score_tokens"
                    value="Score tokens"/>
-            <input type="submit" name="next_token"
-                   value="Next token"/>
             <input type="checkbox"
                    {% if lines_as_separate %}checked="checked"{% endif %}
                    id="lines_as_separate" name="lines_as_separate"/>
             <label for="lines_as_separate">
                 treat each line as a separate text
             </label>
+            <br/>
+
+            <input type="submit" name="next_token"
+                   value="Next token"/>
+            <br/>
+
+            <input type="submit" name="generate_text"
+                   value="Generate text"/>
 
         </div>
     </form>
@@ -84,6 +96,13 @@
                 {% endfor %}
             </tbody>
         </table>
+    {% endif %}
+
+    {% if generated_text %}
+        <div>
+            <span class="query-text">{{ text }}</span>
+            <span class="generated-text">{{ generated_text }}</span>
+        </div>
     {% endif %}
 
     {% if occurred_scores %}

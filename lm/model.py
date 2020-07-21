@@ -50,12 +50,11 @@ class Model(nn.Module):
         # Transformer
         presents = []
         for i, block in enumerate(self.blocks):
+            args = (h, past[:, i] if past is not None else None)
             if self.hparams.gradient_checkpointing:
-                h, present = torch.utils.checkpoint.checkpoint(
-                    block, h, past[:, i] if past is not None else None)
+                h, present = torch.utils.checkpoint.checkpoint(block, *args)
             else:
-                h, present = block(
-                    h, past=past[:, i] if past is not None else None)
+                h, present = block(*args)
             presents.append(present)
         h = self.ln_f(h)
         if self.out_proj:
@@ -65,7 +64,7 @@ class Model(nn.Module):
         logits = torch.matmul(h_flat, self.wte.weight.t())
         logits = logits.reshape([batch_size, n_ctx, self.hparams.n_vocab])
         return {
-            'presents': torch.stack(tuple(presents), dim=1),
+            'presents': torch.stack(presents, dim=1),
             'logits': logits,
         }
 
@@ -130,8 +129,7 @@ class Attention(nn.Module):
         assert x.shape[-1] == self.hparams.n_hidden
         if past is not None:
             # Should be [batch, 2, heads, sequence, features], where 2 is [k, v]
-            assert len(past.shape) == 5
-            assert past.shape[-1] == self.hparams.n_hidden
+            assert len(past.shape) == 5, past.shape
         c = self.c_attn(x)
         q, k, v = map(self.split_heads, torch.split(c, x.shape[-1], dim=2))
         present = torch.stack([k, v], dim=1)
@@ -204,8 +202,9 @@ class Conv1D(nn.Linear):
         nn.init.zeros_(self.bias)
 
 
-def gelu(x, c=math.sqrt(2 / math.pi)):
-    return 0.5 * x * (1 + torch.tanh(c * (x + 0.044715 * torch.pow(x, 3))))
+@torch.jit.script
+def gelu(x):
+    return 0.5 * x * (1 + torch.tanh(math.sqrt(2 / math.pi) * (x + 0.044715 * torch.pow(x, 3))))
 
 
 def position_for(batch_size, n_steps, past_length, device=None):
