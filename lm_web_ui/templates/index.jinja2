@@ -2,7 +2,13 @@
 
 {% block extra_head %}
     <style>
-        .log-prob-table td:last-child {
+        .log-prob-table th,
+        .log-prob-table td {
+            text-align: left;
+            padding-right: 1em;
+        }
+        .log-prob-table td:last-child,
+        .log-prob-table th:last-child {
             text-align: right;
         }
         .log-prob-table td {
@@ -21,22 +27,32 @@
             font-size: 100%;
             width: 100%;
         }
+        #about {
+            position: absolute;
+            right: 1em;
+            top: 1em;
+        }
     </style>
 {% endblock %}
 
 {% block body %}
 
-    <h1>Russian Language Model</h1>
+    <h1>{{ title }}</h1>
+
+    <div id="about"><a href="/about">About</a></div>
+
     <form method="GET" action="">
         <div>
             <textarea name="text">{{ text }}</textarea>
         </div>
         <div>
-            <input type="submit" name="predict_next_token"
-                   value="Predict next token"
+            <input type="submit" name="score_words"
+                   value="Score words"
                    style="margin-left: 0"/>
-            <input type="submit" name="score_occurred"
-                   value="Score occurred tokens"/>
+            <input type="submit" name="score_tokens"
+                   value="Score tokens"/>
+            <input type="submit" name="next_token"
+                   value="Next token"/>
             <input type="checkbox"
                    {% if lines_as_separate %}checked="checked"{% endif %}
                    id="lines_as_separate" name="lines_as_separate"/>
@@ -71,23 +87,23 @@
     {% endif %}
 
     {% if occurred_scores %}
-        <p>Log probabilities of occurred tokens
+        <p>Log probabilities of occurred {{ unit_name}}s
             [<a href="{{ occurred_scores_csv }}"
                    download="occurred_scores.csv">csv</a>]:</p>
         <table class="log-prob-table">
             <thead>
             <tr>
                 <th>Text No.</th>
-                <th>Token</th>
+                <th>{{ unit_name|capitalize }}</th>
                 <th>Log probability</th>
             </tr>
             </thead>
             <tbody>
             <tr>
-                {% for text_no, token, log_prob in occurred_scores %}
+                {% for text_no, unit, log_prob in occurred_scores %}
                     <tr>
                         <td>{{ text_no }}</td>
-                        <td>{{ token }}</td>
+                        <td>{{ unit }}</td>
                         <td>{{ "%.3f"|format(log_prob) }}</td>
                     </tr>
                 {% endfor %}

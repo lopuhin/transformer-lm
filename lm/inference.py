@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import re
 from typing import List, Tuple, Optional, Dict
 
 import sentencepiece as spm
@@ -7,7 +8,7 @@ import torch
 import numpy as np
 
 from .model import Model, HParams
-from .common import END_OF_LINE, END_OF_TEXT
+from .common import END_OF_LINE, END_OF_TEXT, WORD_START
 
 
 class ModelWrapper:
@@ -27,12 +28,16 @@ class ModelWrapper:
         params = json.loads((root / 'params.json').read_text())
         hparams = params['hparams']
         hparams.setdefault('n_hidden', hparams['n_embed'])
-        model = Model(HParams(**hparams))
-        state = torch.load(root / 'model.pt', map_location='cpu')
-        state_dict = fixed_state_dict(state['state_dict'])
-        model.load_state_dict(state_dict)
-        if 'seen_tokens' in state:
-            params['seen_tokens'] = state['seen_tokens']
+        pkl_path = root / 'model.pkl'
+        if pkl_path.exists():
+            model = torch.load(pkl_path, map_location='cpu')
+        else:
+            model = Model(HParams(**hparams))
+            state = torch.load(root / 'model.pt', map_location='cpu')
+            state_dict = fixed_state_dict(state['state_dict'])
+            model.load_state_dict(state_dict)
+            if 'seen_tokens' in state:
+                params['seen_tokens'] = state['seen_tokens']
         return cls(model, sp_model, params=params)
 
     def tokenize(self, s: str) -> List[str]:
@@ -125,6 +130,57 @@ class ModelWrapper:
             tokens.append(next_token)
 
         return tokens
+
+    def get_occurred_word_log_probs(
+            self, tokens: List[str]) -> List[Tuple[float, str]]:
+        """ Return a list of log probs of occurred words (not tokens!),
+        starting from the second.
+        """
+        def is_word_start(token: str) -> bool:
+            return token.startswith(WORD_START)
+
+        def is_word(token: str) -> bool:
+            return bool(re.search('\w', token))
+
+        def is_continuation(token) -> bool:
+            return is_word(token) and not is_word_start(token)
+
+        def get_word(tokens: List[str]) -> str:
+            return ''.join(t.lstrip(WORD_START) for t in tokens)
+
+        log_probs = self.get_log_probs(tokens)
+        output: List[Tuple[float, str]] = []
+        all_tokens = [self.id_to_token(i) for i in range(len(self.sp_model))]
+        continuation_mask = torch.tensor(list(map(is_continuation, all_tokens)))
+        word_mask = torch.tensor(list(map(is_word, all_tokens)))
+        current_word = []
+
+        def finish_current_word(non_continuation_log_p=0):
+            if not current_word:
+                return
+            word_log_p = sum(lp for lp, _ in current_word)
+            output.append((
+                float(word_log_p + non_continuation_log_p),
+                get_word([t for _, t in current_word])))
+            current_word.clear()
+
+        for idx, token in enumerate(tokens[1:]):
+            if not is_continuation(token):
+                non_continuation_log_p = torch.logsumexp(
+                    log_probs[idx, ~continuation_mask], dim=0)
+                finish_current_word(non_continuation_log_p)
+            if is_word(token):
+                log_p = log_probs[idx, self.token_to_id(token)]
+                words_log_p = torch.logsumexp(log_probs[idx, word_mask], dim=0)
+                # discard punctuation probability as we score only words
+                # (note that log_p is already included in words_log_p)
+                log_p -= words_log_p
+                current_word.append((log_p, token))
+        # FIXME don't we need non_continuation_log_p here as well?
+        finish_current_word()
+
+        return output
+
 
 
 def fixed_state_dict(state_dict):
