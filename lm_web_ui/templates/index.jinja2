@@ -38,6 +38,10 @@
         .query-text {
             font-weight: bold;
         }
+        input[type="number"] {
+            max-width: 3em;
+            margin-right: 1em;
+        }
     </style>
 {% endblock %}
 
@@ -71,6 +75,22 @@
 
             <input type="submit" name="generate_text"
                    value="Generate text"/>
+            <label>
+                tokens:
+                <input type="number" name="gen_tokens" value="{{ gen_tokens }}"/>
+            </label>
+            <label>
+                top_k:
+                <input type="number" name="gen_top_k" value="{{ gen_top_k }}"/>
+            </label>
+            <label>
+                top_p:
+                <input type="number" name="gen_top_p" value="{{ gen_top_p }}" step="any"/>
+            </label>
+            <label>
+                temperature:
+                <input type="number" name="gen_temp" value="{{ gen_temp }}" step="any"/>
+            </label>
 
         </div>
     </form>
