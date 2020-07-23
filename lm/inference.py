@@ -101,14 +101,14 @@ class ModelWrapper:
             reverse=True)
         return result, presents
 
-    def get_top_p_logits(
+    def get_next_top_p_nucleus(
             self, tokens: List[str], top_p: float) -> torch.Tensor:
-        """Return a list top top-p (by nucleus sampling) of prob and token,
+        """Return a list top top-p (by nucleus sampling) of log prob and token,
         for what would come after the last token.
         """
-        return self._get_top_p_logits(tokens, top_p, past=None)[0]
+        return self._get_next_top_p_nucleus(tokens, top_p, past=None)[0]
 
-    def _get_top_p_logits(
+    def _get_next_top_p_nucleus(
             self, tokens: List[str], top_p: float, past: Optional[torch.Tensor],
             ) -> Tuple[torch.Tensor, torch.Tensor]:
         next_log_probs, presents = self._get_log_probs(tokens, past=past)
@@ -131,6 +131,7 @@ class ModelWrapper:
             tokens_to_generate: int,
             top_k: int,
             top_p: float = 0.0,
+            temperature: float = 1.0,
             ) -> List[str]:
         tokens = list(tokens_prefix)
         output_tokens = []
@@ -144,16 +145,18 @@ class ModelWrapper:
 
                 # convert log probs to real probs
                 logprobs = np.array(list(map(lambda a: a[0], ntk)))
+                logprobs /= temperature
                 probs = np.exp(logprobs) / np.exp(logprobs).sum()
 
                 # pick next token randomly according to probs distribution
                 next_token_n = np.random.choice(top_k, p=probs)
                 next_token = ntk[next_token_n][1]
             else:
-                filtered_logits, presents = \
-                    self._get_top_p_logits(tokens, top_p, past=past)
+                filtered_logprobs, presents = self._get_next_top_p_nucleus(
+                    tokens, top_p, past=past)
+                filtered_logprobs /= temperature
                 next_token_n = torch.multinomial(torch.nn.functional.softmax(
-                    filtered_logits, dim=-1), num_samples=1)
+                    filtered_logprobs, dim=-1), num_samples=1)
                 next_token = self.id_to_token(next_token_n)
 
             if past is None:

@@ -22,58 +22,72 @@ TITLE = 'Russian Language Model'
 @aiohttp_jinja2.template('index.jinja2')
 def index(request):
     text = request.query.get('text', '').strip()
+    ctx = {}
     if text:
-        lines_as_separate = bool(request.query.get('lines_as_separate'))
+        ctx.update(dict(
+            text=text,
+            lines_as_separate=bool(request.query.get('lines_as_separate')),
+            gen_tokens=int(request.query.get('gen_tokens')),
+            gen_top_k=int(request.query.get('gen_top_k')),
+            gen_top_p=float(request.query.get('gen_top_p')),
+            gen_temp=float(request.query.get('gen_temp')),
+        ))
     else:
         # defaults
-        text = INITIAL_TEXT
-        lines_as_separate = True
-    ctx = {'text': text, 'lines_as_separate': lines_as_separate}
+        ctx.update(dict(
+            text=INITIAL_TEXT,
+            lines_as_separate=True,
+            gen_tokens=50,
+            gen_top_k=20,
+            gen_top_p=0.0,
+            gen_temp=1.0,
+        ))
     model: ModelWrapper = app['model']
     ctx['title'] = TITLE
 
     score_words = request.query.get('score_words')
     score_tokens = request.query.get('score_tokens')
     if request.query.get('next_token'):
-        handle_token_prediction(model, ctx, text)
+        handle_token_prediction(model, ctx)
     elif request.query.get('generate_text'):
-        handle_text_generation(model, ctx, text)
+        handle_text_generation(model, ctx)
     elif score_words or score_tokens:
-        handle_scoring(
-            model, ctx, text,
-            score_words=score_words,
-            lines_as_separate=lines_as_separate)
+        handle_scoring(model, ctx, score_words=score_words)
     return ctx
 
 
-def handle_token_prediction(model, ctx, text):
-    next_top_k = model.get_next_top_k(tokenize(text), top_k=20)
+def handle_token_prediction(model, ctx):
+    next_top_k = model.get_next_top_k(tokenize(ctx['text']), top_k=20)
     next_top_k = [[token, log_prob] for log_prob, token in next_top_k]
     ctx['next_token_prediction'] = next_top_k
     ctx['next_token_prediction_csv'] = to_csv_data_url(
         next_top_k, ['token', 'log_prob'])
 
 
-def handle_text_generation(model, ctx, text):
+def handle_text_generation(model, ctx):
     tokens = model.generate_tokens(
-        tokenize(text), tokens_to_generate=50, top_k=20)
+        tokenize(ctx['text']),
+        tokens_to_generate=ctx['gen_tokens'],
+        top_k=ctx['gen_top_k'],
+        top_p=ctx['gen_top_p'],
+        temperature=ctx['gen_temp'],
+    )
     ctx['generated_text'] = model.sp_model.decode_pieces(tokens)
     # TODO paragraphs
 
 
-def handle_scoring(
-        model, ctx, text, score_words: bool, lines_as_separate: bool):
+def handle_scoring(model, ctx, score_words: bool):
     if score_words:
         scorer = model.get_occurred_word_log_probs
         unit_name = 'word'
     else:
         scorer = model.get_occurred_log_probs
         unit_name = 'token'
-    if lines_as_separate:
-        texts = [t.strip() for t in text.split('\n')]
+    if ctx['lines_as_separate']:
+        texts = [t.strip() for t in ctx['text'].split('\n')]
         texts = list(filter(None, texts))
     else:
-        texts = [text]
+        texts = [ctx['text']]
     occurred_scores = []
     for i, t in enumerate(texts, 1):
         occurred_scores.extend(
