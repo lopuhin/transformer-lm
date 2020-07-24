@@ -40,6 +40,7 @@ class CharTokenizer:
         self.reverse_vocab = {i: c for c, i in self.vocab.items()}
         self.max_idx = max(self.reverse_vocab)
         self.unk_id = self.vocab[UNK]
+        self.eol_id = self.vocab[END_OF_LINE]
 
     def __len__(self):
         return self.max_idx + 1
@@ -50,6 +51,8 @@ class CharTokenizer:
 
     def piece_to_id(self, x: str) -> int:
         assert len(x) == 1 or x in self.vocab
+        if x == '\n':
+            return self.eol_id
         return self.vocab.get(x, self.unk_id)
 
     def encode_as_ids(self, x: str) -> List[int]:
