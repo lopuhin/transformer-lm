@@ -15,7 +15,7 @@ tokenize-corpus \
     tests/shakespeare-char-encoded
 
 gpt-2 \
-    tests/shakespeare-test-run/ \
+    tests/shakespeare-test-run-char/ \
     tests/shakespeare-char-encoded/ \
     tests/shakespeare/chars.json \
     --batch-size 8 \

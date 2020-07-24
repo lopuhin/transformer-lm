@@ -75,9 +75,9 @@ def char_train():
     vocab = {}
     char_counts.pop('\n')
     for ch, _ in char_counts.most_common(args.max_vocab_size):
-        vocab[ch] = len(vocab) + 1
+        vocab[ch] = len(vocab)
     for ch in [END_OF_LINE, END_OF_TEXT, UNK]:
-        vocab[ch] = len(vocab) + 1
+        vocab[ch] = len(vocab)
     Path(args.output).write_text(
         json.dumps(vocab, indent=4, ensure_ascii=False))
 

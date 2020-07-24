@@ -72,7 +72,7 @@ def handle_text_generation(model, ctx):
         top_p=ctx['gen_top_p'],
         temperature=ctx['gen_temp'],
     )
-    ctx['generated_text'] = model.sp_model.decode_pieces(tokens)
+    ctx['generated_text'] = model.tokenizer.decode_pieces(tokens)
     # TODO paragraphs
 
 
@@ -125,7 +125,7 @@ def about(request):
     model_params = json.loads(app['model_params'])
     model_params.pop('argv')  # too long
     ctx['model_params'] = json.dumps(model_params, indent=4, sort_keys=True)
-    ctx['vocab_size'] = len(app['model'].sp_model)
+    ctx['vocab_size'] = len(app['model'].tokenizer)
     return ctx
 
 

@@ -12,6 +12,11 @@ WORD_START = '▁'
 
 
 def load_tokenizer(path: Path):
+    if path.is_dir():
+        for p in [path / 'chars.json', path / 'sp.model']:
+            if p.exists():
+                path = p
+                break
     if path.name.endswith('.model'):
         tokenizer = spm.SentencePieceProcessor()
         tokenizer.load(str(path))
@@ -50,5 +55,14 @@ class CharTokenizer:
     def encode_as_ids(self, x: str) -> List[int]:
         return list(map(self.piece_to_id, x))
 
+    def encode_as_pieces(self, x: str) -> List[str]:
+        return list(x)
+
     def decode_ids(self, x: List[int]) -> str:
-        return ''.join(self.reverse_vocab[i] for i in x)
+        return self.decode_pieces(map(self.id_to_piece, x))
+
+    def decode_pieces(self, x: List[str]) -> str:
+        return ''.join(x)
+
+    def id_to_piece(self, i: int) -> str:
+        return self.reverse_vocab[i]

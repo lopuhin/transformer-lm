@@ -3,28 +3,25 @@ from pathlib import Path
 import re
 from typing import List, Tuple, Optional, Dict
 
-import sentencepiece as spm
 import torch
 import numpy as np
 
 from .model import Model, HParams
-from .common import END_OF_LINE, END_OF_TEXT, WORD_START
+from .common import END_OF_LINE, END_OF_TEXT, WORD_START, load_tokenizer
 
 
 class ModelWrapper:
     END_OF_LINE = END_OF_LINE
     END_OF_TEXT = END_OF_TEXT
 
-    def __init__(self, model: Model, sp_model: spm.SentencePieceProcessor,
-                 params: Optional[Dict]):
+    def __init__(self, model: Model, tokenizer, params: Optional[Dict]):
         self.model = model
-        self.sp_model = sp_model
+        self.tokenizer = tokenizer
         self.params = params or {}
 
     @classmethod
     def load(cls, root: Path):
-        sp_model = spm.SentencePieceProcessor()
-        sp_model.load(str(root / 'sp.model'))
+        tokenizer = load_tokenizer(root)
         params = json.loads((root / 'params.json').read_text())
         hparams = params['hparams']
         hparams.setdefault('n_hidden', hparams['n_embed'])
@@ -38,19 +35,19 @@ class ModelWrapper:
             model.load_state_dict(state_dict)
             if 'seen_tokens' in state:
                 params['seen_tokens'] = state['seen_tokens']
-        return cls(model, sp_model, params=params)
+        return cls(model, tokenizer, params=params)
 
     def tokenize(self, s: str) -> List[str]:
-        return self.sp_model.EncodeAsPieces(s)
+        return self.tokenizer.encode_as_pieces(s)
 
     def token_to_id(self, token: str) -> int:
-        return self.sp_model.PieceToId(token)
+        return self.tokenizer.piece_to_id(token)
 
     def id_to_token(self, token_id: int) -> str:
-        return self.sp_model.IdToPiece(int(token_id))
+        return self.tokenizer.id_to_piece(int(token_id))
 
     def get_log_probs(self, tokens: List[str]) -> torch.Tensor:
-        """ Return a tensor with shape (len(tokens), len(self.sp_model)),
+        """ Return a tensor with shape (len(tokens), len(self.tokenizer)),
         with log-probabilities for tokens after each token in tokens.
         If this is a start of the text, you may want to prepend END_OF_TEXT:
         model.get_log_probs([model.END_OF_TEXT] + tokens).
@@ -188,7 +185,7 @@ class ModelWrapper:
 
         log_probs = self.get_log_probs(tokens)
         output: List[Tuple[float, str]] = []
-        all_tokens = [self.id_to_token(i) for i in range(len(self.sp_model))]
+        all_tokens = [self.id_to_token(i) for i in range(len(self.tokenizer))]
         continuation_mask = torch.tensor(list(map(is_continuation, all_tokens)))
         word_mask = torch.tensor(list(map(is_word, all_tokens)))
         current_word = []
