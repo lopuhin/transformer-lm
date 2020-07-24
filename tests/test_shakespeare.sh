@@ -59,4 +59,5 @@ gpt-2 \
     --n-hidden 16 \
     --n-head 4 \
     --n-layer 3 \
-    --only-validate
+    --only-validate \
+    --sample-sentences

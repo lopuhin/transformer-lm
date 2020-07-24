@@ -1,5 +1,5 @@
 import argparse
-from collections import defaultdict, Counter
+from collections import Counter
 import json
 from pathlib import Path
 from typing import List
@@ -97,7 +97,6 @@ def _get_train_paths(corpora: List[str]) -> List[Path]:
 
 
 def tokenize_corpus():
-    # TODO support large corpora
     parser = argparse.ArgumentParser(
         description='encode corpus with a tokenizer')
     arg = parser.add_argument
@@ -106,6 +105,7 @@ def tokenize_corpus():
     arg('tokenizer', help='path to tokenizer')
     arg('output', help='path to the output directory, '
                        'which will contain train.npy, valid.npy and test.npy')
+    arg('--chunk-size', type=int, default=2**29)
     args = parser.parse_args()
 
     tokenizer = load_tokenizer(Path(args.tokenizer))
@@ -118,8 +118,10 @@ def tokenize_corpus():
     else:
         dtype =np.uint32
 
+    output_root = Path(args.output)
+    output_root.mkdir(exist_ok=True, parents=True)
+
     print(f'Reading corpora: {args.corpora}')
-    encoded_splits = defaultdict(list)
     for corpus_root in map(Path, args.corpora):
         for split in ['train', 'valid', 'test']:
             split_root = corpus_root / split
@@ -128,9 +130,25 @@ def tokenize_corpus():
                 parser.error(f'Corpus {split} split {split_root} looks empty, '
                              f'no text files found')
 
+            parts = []
+            chunk_num = 0
+
             def append_and_clear(x):
-                encoded_splits[split].append(np.array(x, dtype=dtype))
+                parts.append(np.array(x, dtype=dtype))
                 x.clear()
+                if sum(map(len, parts)) >= args.chunk_size:
+                    write_chunk()
+
+            def write_chunk():
+                if not parts:
+                    return
+                nonlocal chunk_num
+                encoded = np.concatenate(parts)
+                parts.clear()
+                assert encoded.dtype == dtype
+                split_path = output_root / f'{split}-{chunk_num}.npy'
+                chunk_num += 1
+                np.save(split_path, encoded)
 
             for path in tqdm.tqdm(split_paths, desc=str(split_root)):
                 encoded = []
@@ -144,11 +162,4 @@ def tokenize_corpus():
                     encoded.append(eot)
                 append_and_clear(encoded)
 
-    output_root = Path(args.output)
-    output_root.mkdir(exist_ok=True, parents=True)
-    for split in ['train', 'valid', 'test']:
-        split_path = output_root / f'{split}.npy'
-        print(f'Saving encoded split {split} to {split_path}')
-        encoded = np.concatenate(encoded_splits[split])
-        assert encoded.dtype == dtype
-        np.save(split_path, encoded)
+            write_chunk()

@@ -9,3 +9,4 @@ install:
 script:
   - pytest tests
   - ./tests/test_shakespeare.sh
+  - ./tests/test_shakespeare_char.sh

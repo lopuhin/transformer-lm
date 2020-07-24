@@ -12,7 +12,8 @@ char-train \
 tokenize-corpus \
     tests/shakespeare/ \
     tests/shakespeare/chars.json \
-    tests/shakespeare-char-encoded
+    tests/shakespeare-char-encoded \
+    --chunk-size 10000
 
 gpt-2 \
     tests/shakespeare-test-run-char/ \
@@ -29,4 +30,5 @@ gpt-2 \
     --log-every 2 \
     --save-every 50 \
     --validate-every 100 \
+    --sample-sentences \
     --clean

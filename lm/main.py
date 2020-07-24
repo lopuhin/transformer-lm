@@ -118,16 +118,18 @@ def main(
 
     dataset_path = Path(dataset_path)
     print(f'Loading dataset from {dataset_path}')
-    valid_dataset = np.load(dataset_path / 'valid.npy')
-    train_dataset = np.load(dataset_path / 'train.npy')
+    train_datasets, valid_datasets = (
+        [np.load(p, mmap_mode='r') for p in dataset_path.glob(f'{name}*.npy')]
+        for name in ['train', 'valid'])
     step_tokens = n_ctx * batch_size * g_accum_gradients  # all GPUs
-    print(f'Train dataset has {len(train_dataset):,} tokens')
-    print(f'Validation dataset has {len(valid_dataset):,} tokens')
+    train_tokens = sum(map(len, train_datasets))
+    print(f'Train dataset has {train_tokens:,} tokens')
+    print(f'Validation dataset has {sum(map(len, valid_datasets)):,} tokens')
 
     if sample_sentences:
         train_sample_index, valid_sample_index = [
-            _sentence_sample_index(dataset, n_ctx, tokenizer)
-            for dataset in [train_dataset, valid_dataset]]
+            _sentence_sample_index(datasets, n_ctx, tokenizer)
+            for datasets in [train_datasets, valid_datasets]]
     else:
         train_sample_index = valid_sample_index = None
 
@@ -190,7 +192,7 @@ def main(
         """ Train step on one GPU.
         """
         context = _gen_training_batch(
-            train_dataset,
+            train_datasets,
             n_ctx=n_ctx,
             batch_size=batch_size * accum_gradients,
             sample_index=train_sample_index)
@@ -225,7 +227,7 @@ def main(
 
     def train():
         nonlocal seen_tokens
-        epoch_size = len(train_dataset) // step_tokens * step_tokens
+        epoch_size = train_tokens // step_tokens * step_tokens
         pbar = tqdm.trange(
             epochs, desc='epochs', dynamic_ncols=True, disable=not is_main)
         init_epoch_pbar = lambda: tqdm.trange(
@@ -282,7 +284,7 @@ def main(
         losses = defaultdict(AverageMeter)
         with torch.no_grad():
             for ctx in _valid_batch_iter(
-                    valid_dataset, batch_size=batch_size, n_ctx=n_ctx,
+                    valid_datasets, batch_size=batch_size, n_ctx=n_ctx,
                     sample_index=valid_sample_index):
                 if not ctx:
                     continue
@@ -324,41 +326,56 @@ def main(
                 sys.exit(1)
 
 
-def _sentence_sample_index(dataset: np.ndarray, n_ctx: int, tokenizer):
+def _sentence_sample_index(datasets: List[np.ndarray], n_ctx: int, tokenizer):
     # a very very dumb implementation for a start
     ids = np.array([
         tokenizer.piece_to_id(x) for x in ['.', END_OF_LINE, END_OF_TEXT]])
-    sample_index = np.nonzero(np.isin(dataset, ids))[0] + 1
-    print(f'{len(sample_index):,} "sentences" found for sampling')
-    return np.clip(sample_index, 0, len(dataset) - n_ctx - 1)
+    sample_index = []
+    for dataset in datasets:
+        dataset_index = np.nonzero(np.isin(dataset, ids))[0] + 1
+        dataset_index = np.clip(dataset_index, 0, len(dataset) - n_ctx - 1)
+        sample_index.append(dataset_index)
+    print(f'{sum(map(len, sample_index)):,} "sentences" found for sampling')
+    return sample_index
 
 
 def _gen_training_batch(
-        dataset: np.ndarray, n_ctx: int, batch_size: int,
-        sample_index: Optional[np.ndarray]) -> List[np.ndarray]:
+        datasets: List[np.ndarray], n_ctx: int, batch_size: int,
+        sample_index: Optional[List[np.ndarray]]) -> List[np.ndarray]:
+    dataset_p = np.array([len(x) for x in datasets], dtype=np.float)
+    dataset_p /= dataset_p.sum()
+    dataset_indices = np.random.choice(
+        len(datasets), batch_size, p=dataset_p, replace=True)
     if sample_index is not None:
-        indices = np.random.choice(sample_index, batch_size)
+        indices = [(datasets[i], np.random.choice(sample_index[i]))
+                   for i in dataset_indices]
     else:
-        indices = [np.random.randint(0, len(dataset) - n_ctx)
-                   for _ in range(batch_size)]
-    return [dataset[idx: idx + n_ctx] for idx in indices]
+        indices = [(datasets[i], np.random.randint(0, len(datasets[i]) - n_ctx))
+                   for i in dataset_indices]
+    return [dataset[idx: idx + n_ctx] for dataset, idx in indices]
 
 
 def _valid_batch_iter(
-        dataset: np.ndarray, *, batch_size: int, n_ctx: int,
-        sample_index: Optional[np.ndarray] = None,
+        datasets: np.ndarray, *, batch_size: int, n_ctx: int,
+        sample_index: Optional[List[np.ndarray]] = None,
         ):
+    start_indices = []
     if sample_index is not None:
-        start_indices = []  # remove items which are too frequent
-        for i, idx in enumerate(sample_index):
-            if (i == 0 or i == len(sample_index) - 1 or
-                    sample_index[i + 1] > start_indices[-1] + n_ctx):
-                start_indices.append(idx)
+        for dataset_i, dataset_index in enumerate(sample_index):
+            for i, idx in enumerate(dataset_index):
+                if (i == 0 or i == len(dataset_index) - 1 or (
+                        start_indices and
+                        start_indices[-1][0] == dataset_i and
+                        dataset_index[i + 1] > start_indices[-1][1] + n_ctx)):
+                    start_indices.append((dataset_i, idx))
     else:
-        start_indices = range(0, len(dataset) - n_ctx, n_ctx)
+        for dataset_i, dataset in enumerate(datasets):
+            start_indices.extend(
+                (dataset_i, i) for i in range(0, len(dataset) - n_ctx, n_ctx))
     return _batch_it(
-        (dataset[start_idx: start_idx + n_ctx] for start_idx in tqdm.tqdm(
-            start_indices, desc='validation', leave=False)),
+        (datasets[dataset_i][start_idx: start_idx + n_ctx]
+            for dataset_i, start_idx in tqdm.tqdm(
+                start_indices, desc='validation', leave=False)),
         batch_size=batch_size)
 
 
