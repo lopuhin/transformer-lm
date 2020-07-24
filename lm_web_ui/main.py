@@ -91,15 +91,18 @@ def handle_scoring(model, ctx, score_words: bool):
     occurred_scores = []
     for i, t in enumerate(texts, 1):
         occurred_scores.extend(
-            (i, unit, log_prob) for log_prob, unit in scorer(tokenize(t)))
+            (i, unit, log_prob) for log_prob, unit in scorer(
+                tokenize(t, add_eos_prefix=True)))
     ctx['occurred_scores'] = occurred_scores
     ctx['occurred_scores_csv'] = to_csv_data_url(
         occurred_scores, ['text_no', unit_name, 'log_prob'])
     ctx['unit_name'] = unit_name
 
 
-def tokenize(text: str) -> List[str]:
+def tokenize(text: str, add_eos_prefix: bool = False) -> List[str]:
     tokens = app['model'].tokenize(text)
+    if add_eos_prefix:
+        tokens = [app['model'].END_OF_TEXT] + tokens
     tokens = tokens[:app['model'].model.hparams.n_ctx]
     return tokens
 
