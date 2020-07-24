@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Test preparation and training on a very small corpus
-# To be run from repo root
+# Test preparation and training on a very small corpus.
+# To be run from repo root.
 
 set -ev
 
@@ -10,7 +10,7 @@ sp-train \
     tests/shakespeare/sp-model \
     --vocab-size 2000
 
-sp-encode \
+tokenize-corpus \
     tests/shakespeare/ \
     tests/shakespeare/sp-model.model \
     tests/shakespeare-encoded

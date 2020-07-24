@@ -23,7 +23,6 @@ from .fire_utils import only_allow_defined_args, get_defined_args
 from .model import Model, HParams
 from .inference import fixed_state_dict
 from .common import END_OF_LINE, END_OF_TEXT, load_tokenizer, tokenizer_name
-from .data import Dataset
 
 
 def main(
@@ -127,7 +126,7 @@ def main(
 
     if sample_sentences:
         train_sample_index, valid_sample_index = [
-            _sentence_sample_index(dataset, n_ctx, sp_model)
+            _sentence_sample_index(dataset, n_ctx, tokenizer)
             for dataset in [train_dataset, valid_dataset]]
     else:
         train_sample_index = valid_sample_index = None
@@ -198,7 +197,7 @@ def main(
         if verbose:
             print()
             for ctx in context:
-                print(repr(sp_model.decode_ids(list(map(int, ctx)))))
+                print(repr(tokenizer.decode_ids(list(map(int, ctx)))))
             print()
         context = torch.LongTensor(context)
         optimizer.zero_grad()
@@ -325,9 +324,10 @@ def main(
                 sys.exit(1)
 
 
-def _sentence_sample_index(dataset: np.ndarray, n_ctx: int, sp_model):
+def _sentence_sample_index(dataset: np.ndarray, n_ctx: int, tokenizer):
     # a very very dumb implementation for a start
-    ids = np.array([sp_model.piece_to_id(x) for x in ['.', END_OF_LINE, END_OF_TEXT]])
+    ids = np.array([
+        tokenizer.piece_to_id(x) for x in ['.', END_OF_LINE, END_OF_TEXT]])
     sample_index = np.nonzero(np.isin(dataset, ids))[0] + 1
     print(f'{len(sample_index):,} "sentences" found for sampling')
     return np.clip(sample_index, 0, len(dataset) - n_ctx - 1)

@@ -8,7 +8,7 @@ import numpy as np
 import sentencepiece as spm
 import tqdm
 
-from .common import UNK, END_OF_TEXT, END_OF_LINE
+from .common import UNK, END_OF_TEXT, END_OF_LINE, load_tokenizer
 
 
 def sp_train():
@@ -73,9 +73,11 @@ def char_train():
             for line in f:
                 char_counts.update(line)
     vocab = {}
+    char_counts.pop('\n')
     for ch, _ in char_counts.most_common(args.max_vocab_size):
         vocab[ch] = len(vocab) + 1
-    vocab[END_OF_TEXT] = len(vocab) + 1
+    for ch in [END_OF_LINE, END_OF_TEXT, UNK]:
+        vocab[ch] = len(vocab) + 1
     Path(args.output).write_text(
         json.dumps(vocab, indent=4, ensure_ascii=False))
 
@@ -94,22 +96,27 @@ def _get_train_paths(corpora: List[str]) -> List[Path]:
     return paths
 
 
-def sp_encode():
+def tokenize_corpus():
+    # TODO support large corpora
     parser = argparse.ArgumentParser(
-        description='encode corpus with a sentencepiece model')
+        description='encode corpus with a tokenizer')
     arg = parser.add_argument
     arg('corpora', nargs='+',
         help='corpus roots, containing train/valid/test splits')
-    arg('sp_model', help='path to output model')
+    arg('tokenizer', help='path to tokenizer')
     arg('output', help='path to the output directory, '
                        'which will contain train.npy, valid.npy and test.npy')
     args = parser.parse_args()
 
-    sp_model = spm.SentencePieceProcessor()
-    assert sp_model.load(args.sp_model)
-    eot = sp_model.PieceToId(END_OF_TEXT)
-    eol = sp_model.PieceToId(END_OF_LINE)
-    dtype = np.uint16 if len(sp_model) < 2**16 - 1 else np.uint32
+    tokenizer = load_tokenizer(Path(args.tokenizer))
+    eot = tokenizer.piece_to_id(END_OF_TEXT)
+    eol = tokenizer.piece_to_id(END_OF_LINE)
+    if len(tokenizer) < 2**8 - 1:
+        dtype = np.uint8
+    elif len(tokenizer) < 2**16 - 1:
+        dtype = np.uint16
+    else:
+        dtype =np.uint32
 
     print(f'Reading corpora: {args.corpora}')
     encoded_splits = defaultdict(list)
@@ -129,7 +136,7 @@ def sp_encode():
                 encoded = []
                 with path.open('rt', encoding='utf8') as f:
                     for line in f:
-                        encoded.extend(sp_model.EncodeAsIds(line))
+                        encoded.extend(tokenizer.encode_as_ids(line))
                         encoded.append(eol)
                         if len(encoded) > 100000:
                             # save memory by using a more compact representation

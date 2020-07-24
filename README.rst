@@ -42,9 +42,12 @@ Corpus format: a directory with top-level ``train``, ``valid`` and ``test``
 folders. Each top-level folder may contain sub-folders. Inside them,
 there must be utf-8 encoded text files with ``.txt`` extension.
 
-The commands to train sentencepiece model and encode the corpus support
+The commands to train tokenizer and encode the corpus support
 multiple corpora,
 in below examples we assume they can be listed as ``data/corpora-*``.
+
+Two kinds of tokenizers are supported, sentencepiece and char.
+Using sentencepiece:
 
 1. Train sentencepiece model (``sp-text.txt`` can be removed after running).
    This can consume a large amount of memory, adjust sentencepiece arguments
@@ -53,10 +56,20 @@ in below examples we assume they can be listed as ``data/corpora-*``.
 
     sp-train data/corpora-* sp-text.txt sp-model
 
+2. Encode corpora, producing numpy files
+   (note that ``.model`` extension was added)::
+
+    tokenize-corpus data/corpora-* sp-model.model data/encoded
+
+Using char tokenizer:
+
+1. Train tokenizer (please keep ``.json`` tokenizer extension)::
+
+    char-train data/corpora-* tokenizer.json
+
 2. Encode corpora, producing numpy files::
 
-    sp-encode data/corpora-* sp-model.model data/encoded
-
+    tokenize-corpus data/corpora-* tokenizer.json data/encoded
 
 Training
 ++++++++
@@ -64,6 +77,10 @@ Training
 Example command::
 
     gpt-2 run-root data/encoded sp-model.model
+
+or
+
+    gpt-2 run-root data/encoded tokenizer.json
 
 ``run-root`` would contain model checkpoints and json-lines logs,
 which can be plotted in a jupyter notebook with
