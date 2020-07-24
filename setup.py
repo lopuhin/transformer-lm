@@ -14,6 +14,7 @@ setup(
     entry_points={
         'console_scripts': [
             'sp-train = lm.data:sp_train',
+            'char-train = lm.data:char_train',
             'sp-encode = lm.data:sp_encode',
             'gpt-2-tf-train = lm.gpt_2_tf.train:main',
             'gpt-2 = lm.main:fire_main',
