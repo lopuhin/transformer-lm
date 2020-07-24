@@ -18,18 +18,18 @@ import torch.backends.cudnn as cudnn
 import torch.multiprocessing as mp
 from torch import nn, optim
 import tqdm
-import sentencepiece as spm
 
 from .fire_utils import only_allow_defined_args, get_defined_args
 from .model import Model, HParams
 from .inference import fixed_state_dict
-from .common import END_OF_LINE, END_OF_TEXT
+from .common import END_OF_LINE, END_OF_TEXT, load_tokenizer, tokenizer_name
+from .data import Dataset
 
 
 def main(
         run_path,
         dataset_path,
-        sp_model_path,
+        tokenizer_path,
         epochs=10,
         lr=2.5e-4,
         batch_size=2,  # per GPU
@@ -79,6 +79,7 @@ def main(
     run_path = Path(run_path)
     model_path = run_path / 'model.pt'
     optimizer_path = run_path / 'optim.pt'
+    tokenizer = load_tokenizer(Path(tokenizer_path))
     if is_main:
         run_path_mark = run_path / '.lm'
         if clean and run_path.exists():
@@ -86,13 +87,10 @@ def main(
             shutil.rmtree(run_path)
         run_path.mkdir(exist_ok=True, parents=True)
         run_path_mark.touch()
-        shutil.copy(sp_model_path, run_path / 'sp.model')
-
-    sp_model = spm.SentencePieceProcessor()
-    sp_model.load(sp_model_path)
+        shutil.copy(tokenizer_path, run_path / tokenizer_name(tokenizer))
 
     hparams = HParams(
-        n_vocab=len(sp_model),
+        n_vocab=len(tokenizer),
         n_ctx=n_ctx,
         n_embed=n_embed,
         n_hidden=n_hidden or n_embed,
