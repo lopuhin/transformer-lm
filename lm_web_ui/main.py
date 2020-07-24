@@ -99,7 +99,7 @@ def handle_scoring(model, ctx, score_words: bool):
 
 
 def tokenize(text: str) -> List[str]:
-    tokens = [app['model'].END_OF_TEXT] + app['model'].tokenize(text)
+    tokens = app['model'].tokenize(text)
     tokens = tokens[:app['model'].model.hparams.n_ctx]
     return tokens
 
